@@ -1,0 +1,16 @@
+{
+  "name": "bangumi-second-degree-friends",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "prettier": "^3.6.2",
+    "rollup": "^4.52.5"
+  }
+}
