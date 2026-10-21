@@ -92,7 +92,14 @@ export function relationshipCache(window, home) {
             avatar: "",
             ...data.users[member],
             count: 0,
+            contributors: [],
           };
+          candidate.contributors.push({
+            id,
+            name: id,
+            avatar: "",
+            ...data.users[id],
+          });
           candidate.count++;
           candidates.set(member, candidate);
         }
