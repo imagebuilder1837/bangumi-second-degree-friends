@@ -545,6 +545,9 @@ test("cached rankings disclose exact contributors and mode changes reset both ca
     configure: storage.install,
   });
   link(document, "二度好友发现").click();
+  await waitFor(() =>
+    document.querySelector('[role="status"]').textContent.startsWith("缓存："),
+  );
   assert.match(
     document.querySelector('[role="status"]').textContent,
     /^缓存：/,
@@ -575,6 +578,7 @@ test("cached rankings disclose exact contributors and mode changes reset both ca
   assert.equal(document.querySelectorAll("ol > li").length, 0);
   mode.value = "friends/friends";
   mode.dispatchEvent(new window.Event("change"));
+  await waitFor(() => document.querySelectorAll("ol > li").length === 50);
   assert.equal(document.querySelectorAll("ol > li").length, 50);
   assert.ok(button(row(), "展开贡献者"));
   button(row(), "展开贡献者").click();

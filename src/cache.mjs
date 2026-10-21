@@ -1,6 +1,9 @@
 import { addContributions, rankCandidates } from "./candidates.mjs";
 
-const key = "second-degree-friends:relationships";
+const databaseName = "second-degree-friends";
+const storeName = "relationships";
+const unavailableMessage =
+  "IndexedDB 不可用或访问被拒绝，请检查浏览器支持和站点存储权限后重试";
 const dictionary = () => Object.create(null);
 const empty = () => ({
   version: 1,
@@ -57,25 +60,88 @@ function validated(value) {
   return data;
 }
 
-function read(window, required = false) {
-  let text;
-  try {
-    text = window.localStorage.getItem(key);
-  } catch (error) {
-    if (required) throw error;
-    return empty();
-  }
-  try {
-    return validated(JSON.parse(text));
-  } catch {
-    return empty();
-  }
+async function transact(window, mode, operation, signal) {
+  signal?.throwIfAborted();
+  if (typeof window.indexedDB?.open !== "function")
+    throw new Error(unavailableMessage);
+  return new Promise((resolve, reject) => {
+    const opening = window.indexedDB.open(databaseName, 1);
+    let blocked = false;
+    opening.onupgradeneeded = () => {
+      opening.result.createObjectStore(storeName);
+    };
+    opening.onerror = () => reject(opening.error);
+    opening.onblocked = () => {
+      blocked = true;
+      reject(
+        new Error("IndexedDB 升级被其他标签页阻塞，请关闭其他标签页后重试"),
+      );
+    };
+    opening.onsuccess = () => {
+      const database = opening.result;
+      database.onversionchange = () => database.close();
+      if (blocked || signal?.aborted) {
+        database.close();
+        reject(signal?.reason);
+        return;
+      }
+      let transaction;
+      try {
+        transaction = database.transaction(storeName, mode);
+      } catch (error) {
+        database.close();
+        reject(error);
+        return;
+      }
+      let result;
+      let failure;
+      const abort = () => transaction.abort();
+      const close = () => {
+        signal?.removeEventListener("abort", abort);
+        database.close();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      transaction.onabort = () => {
+        close();
+        reject(
+          signal?.aborted ? signal.reason : (failure ?? transaction.error),
+        );
+      };
+      transaction.oncomplete = () => {
+        close();
+        resolve(result);
+      };
+      const store = transaction.objectStore(storeName);
+      const reading = store.get("snapshots");
+      reading.onsuccess = () => {
+        try {
+          signal?.throwIfAborted();
+          result = operation(store, validated(reading.result));
+        } catch (error) {
+          failure = error;
+          transaction.abort();
+        }
+      };
+    };
+  });
+}
+
+export function cacheFailure(error) {
+  if (error?.name === "QuotaExceededError")
+    return "存储容量不足，请检查浏览器存储容量后重试";
+  if (
+    ["SecurityError", "InvalidStateError", "NotAllowedError"].includes(
+      error?.name,
+    )
+  )
+    return unavailableMessage;
+  return error?.message || unavailableMessage;
 }
 
 export function relationshipCache(window, home) {
-  let data = read(window);
   return {
-    lookup(mode) {
+    async lookup(mode) {
+      const data = await transact(window, "readonly", (_, data) => data);
       const [first, second] = mode.split("/");
       const initial = data.relationships[home.id]?.[first];
       const excluded = data.relationships[home.id]?.[second];
@@ -103,18 +169,10 @@ export function relationshipCache(window, home) {
       };
     },
     async commit(staged, signal) {
-      if (
-        typeof window.localStorage?.getItem !== "function" ||
-        typeof window.localStorage?.setItem !== "function" ||
-        typeof window.navigator.locks?.request !== "function"
-      )
-        throw new Error("无法安全保存缓存");
-      await window.navigator.locks.request(
-        key,
-        { mode: "exclusive", signal },
-        () => {
-          signal.throwIfAborted();
-          const merged = read(window, true);
+      await transact(
+        window,
+        "readwrite",
+        (store, merged) => {
           for (const [id, directions] of Object.entries(staged.relationships)) {
             merged.relationships[id] ??= dictionary();
             for (const [direction, snapshot] of Object.entries(directions)) {
@@ -130,9 +188,9 @@ export function relationshipCache(window, home) {
             )
               merged.users[id] = user;
           }
-          window.localStorage.setItem(key, JSON.stringify(merged));
-          data = merged;
+          store.put(merged, "snapshots");
         },
+        signal,
       );
     },
   };

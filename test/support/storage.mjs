@@ -1,44 +1,47 @@
+import { IDBFactory } from "fake-indexeddb";
+
 export function sharedStorage() {
-  const values = new Map();
-  const writes = [];
-  let tail = Promise.resolve();
-  let failWrite = false;
-  let beforeLock;
+  const indexedDB = new IDBFactory();
   return {
-    values,
-    writes,
-    failWrites() {
-      failWrite = true;
-    },
-    beforeLock(callback) {
-      beforeLock = callback;
-    },
+    indexedDB,
     install(window) {
-      Object.defineProperty(window, "localStorage", {
+      Object.defineProperty(window, "indexedDB", {
         configurable: true,
-        value: {
-          getItem: (key) => values.get(key) ?? null,
-          setItem: (key, value) => {
-            if (failWrite) throw new Error("QuotaExceededError");
-            values.set(key, value);
-            writes.push(value);
-          },
-        },
+        writable: true,
+        value: indexedDB,
       });
-      Object.defineProperty(window.navigator, "locks", {
-        configurable: true,
-        value: {
-          request: (name, options, callback) => {
-            const pending = tail.then(async () => {
-              await beforeLock?.();
-              options.signal?.throwIfAborted();
-              return callback();
-            });
-            tail = pending.catch(() => {});
-            return pending;
-          },
-        },
+    },
+  };
+}
+
+export function interceptWrites(indexedDB, write) {
+  return interceptTransactions(indexedDB, (transaction, mode) => {
+    if (mode !== "readwrite") return;
+    const objectStore = transaction.objectStore.bind(transaction);
+    transaction.objectStore = (...args) => {
+      const store = objectStore(...args);
+      const put = store.put.bind(store);
+      store.put = (...args) => write(put, ...args);
+      return store;
+    };
+  });
+}
+
+// Fault injection stays at the browser database boundary, using real transactions.
+export function interceptTransactions(indexedDB, intercept) {
+  return {
+    open(...args) {
+      const opening = indexedDB.open(...args);
+      opening.addEventListener("success", () => {
+        const database = opening.result;
+        const transaction = database.transaction.bind(database);
+        database.transaction = (...args) => {
+          const result = transaction(...args);
+          intercept(result, args[1]);
+          return result;
+        };
       });
+      return opening;
     },
   };
 }

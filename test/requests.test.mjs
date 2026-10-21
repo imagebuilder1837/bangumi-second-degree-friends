@@ -259,6 +259,7 @@ test("stop during backoff cancels retries and a late timed-out response cannot r
   button(document, "开始寻找").click();
   await time.tick(30000);
   await time.tick(1125);
+  await waitFor(() => button(document, "开始寻找"));
   assert.match(status(document), /^完成/);
   late(response("", { ok: false, status: 429, headers: { get: () => "60" } }));
   await time.tick(0);

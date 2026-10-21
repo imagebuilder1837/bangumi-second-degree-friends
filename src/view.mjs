@@ -1,4 +1,4 @@
-export function mountView(window, entry, scan, cached = () => undefined) {
+export function mountView(window, entry, scan, cached = async () => undefined) {
   const { document } = window;
   const dialog = document.createElement("section");
   dialog.id = "second-degree-friends-dialog";
@@ -198,16 +198,28 @@ export function mountView(window, entry, scan, cached = () => undefined) {
   window.addEventListener("pagehide", () => task?.controller.abort());
   let cooldownUntil = 0;
   let viewed = false;
-  const showCached = () => {
-    const outcome = cached(mode.value);
+  let cacheRequest = 0;
+  const showCached = async () => {
+    const request = ++cacheRequest;
+    viewed = true;
     resetResults();
+    setStatus("正在读取缓存");
+    let outcome;
+    try {
+      outcome = await cached(mode.value);
+    } catch (error) {
+      if (request === cacheRequest && window.Date.now() >= cooldownUntil)
+        setStatus(`缓存读取失败：${error.message}；可主动开始寻找`);
+      return;
+    }
+    if (request !== cacheRequest) return;
     render(outcome?.results ?? [], Boolean(outcome));
+    if (window.Date.now() < cooldownUntil) return;
     setStatus(
       outcome
         ? `缓存：${outcome.results.length} 位候选用户；关系获取时间 ${new window.Date(outcome.earliest).toISOString()} — ${new window.Date(outcome.latest).toISOString()}`
         : "缓存不足，请主动开始寻找",
     );
-    viewed = true;
   };
   mode.addEventListener("change", () => {
     if (task) {
@@ -229,6 +241,7 @@ export function mountView(window, entry, scan, cached = () => undefined) {
       mode: mode.value,
     };
     task = current;
+    cacheRequest++;
     start.textContent = "停止寻找";
     mode.disabled = true;
     if (!dialog.hidden) start.focus();

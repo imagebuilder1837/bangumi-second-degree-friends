@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 import { initialize } from "../../src/entry.mjs";
+import { sharedStorage } from "./storage.mjs";
 
 const home = await readFile(
   new URL("../fixtures/home.html", import.meta.url),
@@ -21,6 +22,7 @@ export function component(
     if (!respond) throw new Error("Unexpected network request");
     return respond(String(url), options);
   };
+  sharedStorage().install(dom.window);
   configure?.(dom.window);
   initialize(dom.window);
   dom.window.document.dispatchEvent(new dom.window.Event("DOMContentLoaded"));

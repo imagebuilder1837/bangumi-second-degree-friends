@@ -341,7 +341,7 @@
     return { ...publish(), staged };
   }
 
-  function mountView(window, entry, scan, cached = () => undefined) {
+  function mountView(window, entry, scan, cached = async () => undefined) {
     const { document } = window;
     const dialog = document.createElement("section");
     dialog.id = "second-degree-friends-dialog";
@@ -541,16 +541,28 @@
     window.addEventListener("pagehide", () => task?.controller.abort());
     let cooldownUntil = 0;
     let viewed = false;
-    const showCached = () => {
-      const outcome = cached(mode.value);
+    let cacheRequest = 0;
+    const showCached = async () => {
+      const request = ++cacheRequest;
+      viewed = true;
       resetResults();
+      setStatus("正在读取缓存");
+      let outcome;
+      try {
+        outcome = await cached(mode.value);
+      } catch (error) {
+        if (request === cacheRequest && window.Date.now() >= cooldownUntil)
+          setStatus(`缓存读取失败：${error.message}；可主动开始寻找`);
+        return;
+      }
+      if (request !== cacheRequest) return;
       render(outcome?.results ?? [], Boolean(outcome));
+      if (window.Date.now() < cooldownUntil) return;
       setStatus(
         outcome
           ? `缓存：${outcome.results.length} 位候选用户；关系获取时间 ${new window.Date(outcome.earliest).toISOString()} — ${new window.Date(outcome.latest).toISOString()}`
           : "缓存不足，请主动开始寻找",
       );
-      viewed = true;
     };
     mode.addEventListener("change", () => {
       if (task) {
@@ -572,6 +584,7 @@
         mode: mode.value,
       };
       task = current;
+      cacheRequest++;
       start.textContent = "停止寻找";
       mode.disabled = true;
       if (!dialog.hidden) start.focus();
@@ -640,7 +653,10 @@
     });
   }
 
-  const key = "second-degree-friends:relationships";
+  const databaseName = "second-degree-friends";
+  const storeName = "relationships";
+  const unavailableMessage =
+    "IndexedDB 不可用或访问被拒绝，请检查浏览器支持和站点存储权限后重试";
   const dictionary = () => Object.create(null);
   const empty = () => ({
     version: 1,
@@ -697,25 +713,88 @@
     return data;
   }
 
-  function read(window, required = false) {
-    let text;
-    try {
-      text = window.localStorage.getItem(key);
-    } catch (error) {
-      if (required) throw error;
-      return empty();
-    }
-    try {
-      return validated(JSON.parse(text));
-    } catch {
-      return empty();
-    }
+  async function transact(window, mode, operation, signal) {
+    signal?.throwIfAborted();
+    if (typeof window.indexedDB?.open !== "function")
+      throw new Error(unavailableMessage);
+    return new Promise((resolve, reject) => {
+      const opening = window.indexedDB.open(databaseName, 1);
+      let blocked = false;
+      opening.onupgradeneeded = () => {
+        opening.result.createObjectStore(storeName);
+      };
+      opening.onerror = () => reject(opening.error);
+      opening.onblocked = () => {
+        blocked = true;
+        reject(
+          new Error("IndexedDB 升级被其他标签页阻塞，请关闭其他标签页后重试"),
+        );
+      };
+      opening.onsuccess = () => {
+        const database = opening.result;
+        database.onversionchange = () => database.close();
+        if (blocked || signal?.aborted) {
+          database.close();
+          reject(signal?.reason);
+          return;
+        }
+        let transaction;
+        try {
+          transaction = database.transaction(storeName, mode);
+        } catch (error) {
+          database.close();
+          reject(error);
+          return;
+        }
+        let result;
+        let failure;
+        const abort = () => transaction.abort();
+        const close = () => {
+          signal?.removeEventListener("abort", abort);
+          database.close();
+        };
+        signal?.addEventListener("abort", abort, { once: true });
+        transaction.onabort = () => {
+          close();
+          reject(
+            signal?.aborted ? signal.reason : (failure ?? transaction.error),
+          );
+        };
+        transaction.oncomplete = () => {
+          close();
+          resolve(result);
+        };
+        const store = transaction.objectStore(storeName);
+        const reading = store.get("snapshots");
+        reading.onsuccess = () => {
+          try {
+            signal?.throwIfAborted();
+            result = operation(store, validated(reading.result));
+          } catch (error) {
+            failure = error;
+            transaction.abort();
+          }
+        };
+      };
+    });
+  }
+
+  function cacheFailure(error) {
+    if (error?.name === "QuotaExceededError")
+      return "存储容量不足，请检查浏览器存储容量后重试";
+    if (
+      ["SecurityError", "InvalidStateError", "NotAllowedError"].includes(
+        error?.name,
+      )
+    )
+      return unavailableMessage;
+    return error?.message || unavailableMessage;
   }
 
   function relationshipCache(window, home) {
-    let data = read(window);
     return {
-      lookup(mode) {
+      async lookup(mode) {
+        const data = await transact(window, "readonly", (_, data) => data);
         const [first, second] = mode.split("/");
         const initial = data.relationships[home.id]?.[first];
         const excluded = data.relationships[home.id]?.[second];
@@ -745,18 +824,10 @@
         };
       },
       async commit(staged, signal) {
-        if (
-          typeof window.localStorage?.getItem !== "function" ||
-          typeof window.localStorage?.setItem !== "function" ||
-          typeof window.navigator.locks?.request !== "function"
-        )
-          throw new Error("无法安全保存缓存");
-        await window.navigator.locks.request(
-          key,
-          { mode: "exclusive", signal },
-          () => {
-            signal.throwIfAborted();
-            const merged = read(window, true);
+        await transact(
+          window,
+          "readwrite",
+          (store, merged) => {
             for (const [id, directions] of Object.entries(
               staged.relationships,
             )) {
@@ -774,9 +845,9 @@
               )
                 merged.users[id] = user;
             }
-            window.localStorage.setItem(key, JSON.stringify(merged));
-            data = merged;
+            store.put(merged, "snapshots");
           },
+          signal,
         );
       },
     };
@@ -816,14 +887,17 @@
           if (outcome.complete) {
             try {
               await cache.commit(outcome.staged, options.signal);
-            } catch {
+            } catch (error) {
               options.signal.throwIfAborted();
-              outcome.saveWarning = "缓存保存失败，旧缓存保留";
+              outcome.saveWarning = `缓存保存失败：${cacheFailure(error)}；旧缓存保留`;
             }
           }
           return outcome;
         },
-        (mode) => cache.lookup(mode),
+        (mode) =>
+          cache.lookup(mode).catch((error) => {
+            throw new Error(cacheFailure(error));
+          }),
       );
     };
     if (document.readyState === "loading")
