@@ -1,3 +1,5 @@
+import { addContributions, rankCandidates } from "./candidates.mjs";
+
 const key = "second-degree-friends:relationships";
 const dictionary = () => Object.create(null);
 const empty = () => ({
@@ -79,36 +81,22 @@ export function relationshipCache(window, home) {
       const excluded = data.relationships[home.id]?.[second];
       if (!initial || !excluded) return;
       const snapshots = [initial, excluded];
-      const candidates = new Map();
+      const excludedIds = new Set([home.id, ...excluded.members]);
+      const user = (id) => ({ id, name: id, avatar: "", ...data.users[id] });
+      let candidates = new Map();
       for (const id of initial.members) {
         const snapshot = data.relationships[id]?.[second];
         if (!snapshot) return;
         snapshots.push(snapshot);
-        for (const member of snapshot.members) {
-          if (member === home.id || excluded.members.includes(member)) continue;
-          const candidate = candidates.get(member) ?? {
-            id: member,
-            name: member,
-            avatar: "",
-            ...data.users[member],
-            count: 0,
-            contributors: [],
-          };
-          candidate.contributors.push({
-            id,
-            name: id,
-            avatar: "",
-            ...data.users[id],
-          });
-          candidate.count++;
-          candidates.set(member, candidate);
-        }
+        candidates = addContributions(
+          candidates,
+          snapshot.members.map(user),
+          user(id),
+          excludedIds,
+        );
       }
       return {
-        results: [...candidates.values()].sort(
-          (a, b) =>
-            b.count - a.count || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-        ),
+        results: rankCandidates(candidates),
         complete: true,
         earliest: Math.min(...snapshots.map((snapshot) => snapshot.fetchedAt)),
         latest: Math.max(...snapshots.map((snapshot) => snapshot.fetchedAt)),
