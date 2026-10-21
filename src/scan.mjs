@@ -1,5 +1,6 @@
 import { readRelationships } from "./site.mjs";
 import { requestText } from "./requests.mjs";
+import { addContributions, rankCandidates } from "./candidates.mjs";
 
 export async function scanRelationships(
   window,
@@ -38,16 +39,15 @@ export async function scanRelationships(
   const firstMembers = await read(home.id, homeUrl(first));
   const excluded =
     first === second ? firstMembers : await read(home.id, homeUrl(second));
-  const candidates = new Map();
+  const excludedIds = new Set([home.id, ...excluded.keys()]);
+  let candidates = new Map();
   const intermediates = [...firstMembers.values()];
   let next = 0;
   let succeeded = 0;
   let failed = 0;
   const publish = () => {
     signal.throwIfAborted();
-    const results = [...candidates.values()].sort(
-      (a, b) => b.count - a.count || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-    );
+    const results = rankCandidates(candidates);
     const progress = `${succeeded + failed}/${intermediates.length}，成功 ${succeeded}，失败 ${failed}`;
     update(results, progress);
     return { results, progress, complete: failed === 0 };
@@ -63,17 +63,12 @@ export async function scanRelationships(
       ).href;
       try {
         const members = await read(intermediary.id, url);
-        for (const user of members.values()) {
-          if (user.id === home.id || excluded.has(user.id)) continue;
-          const candidate = candidates.get(user.id) ?? {
-            ...user,
-            count: 0,
-            contributors: [],
-          };
-          candidate.contributors.push(intermediary);
-          candidate.count++;
-          candidates.set(user.id, candidate);
-        }
+        candidates = addContributions(
+          candidates,
+          members.values(),
+          intermediary,
+          excludedIds,
+        );
         succeeded++;
       } catch {
         signal.throwIfAborted();

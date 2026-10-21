@@ -237,6 +237,30 @@
     }
   }
 
+  function addContributions(candidates, members, intermediary, excluded) {
+    const next = new Map(candidates);
+    for (const user of members) {
+      if (excluded.has(user.id)) continue;
+      const previous = next.get(user.id) ?? {
+        ...user,
+        count: 0,
+        contributors: [],
+      };
+      next.set(user.id, {
+        ...previous,
+        count: previous.count + 1,
+        contributors: [...previous.contributors, intermediary],
+      });
+    }
+    return next;
+  }
+
+  function rankCandidates(candidates) {
+    return [...candidates.values()].sort(
+      (a, b) => b.count - a.count || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+  }
+
   async function scanRelationships(
     window,
     home,
@@ -274,16 +298,15 @@
     const firstMembers = await read(home.id, homeUrl(first));
     const excluded =
       first === second ? firstMembers : await read(home.id, homeUrl(second));
-    const candidates = new Map();
+    const excludedIds = new Set([home.id, ...excluded.keys()]);
+    let candidates = new Map();
     const intermediates = [...firstMembers.values()];
     let next = 0;
     let succeeded = 0;
     let failed = 0;
     const publish = () => {
       signal.throwIfAborted();
-      const results = [...candidates.values()].sort(
-        (a, b) => b.count - a.count || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-      );
+      const results = rankCandidates(candidates);
       const progress = `${succeeded + failed}/${intermediates.length}，成功 ${succeeded}，失败 ${failed}`;
       update(results, progress);
       return { results, progress, complete: failed === 0 };
@@ -299,17 +322,12 @@
         ).href;
         try {
           const members = await read(intermediary.id, url);
-          for (const user of members.values()) {
-            if (user.id === home.id || excluded.has(user.id)) continue;
-            const candidate = candidates.get(user.id) ?? {
-              ...user,
-              count: 0,
-              contributors: [],
-            };
-            candidate.contributors.push(intermediary);
-            candidate.count++;
-            candidates.set(user.id, candidate);
-          }
+          candidates = addContributions(
+            candidates,
+            members.values(),
+            intermediary,
+            excludedIds,
+          );
           succeeded++;
         } catch {
           signal.throwIfAborted();
@@ -714,37 +732,22 @@
         const excluded = data.relationships[home.id]?.[second];
         if (!initial || !excluded) return;
         const snapshots = [initial, excluded];
-        const candidates = new Map();
+        const excludedIds = new Set([home.id, ...excluded.members]);
+        const user = (id) => ({ id, name: id, avatar: "", ...data.users[id] });
+        let candidates = new Map();
         for (const id of initial.members) {
           const snapshot = data.relationships[id]?.[second];
           if (!snapshot) return;
           snapshots.push(snapshot);
-          for (const member of snapshot.members) {
-            if (member === home.id || excluded.members.includes(member))
-              continue;
-            const candidate = candidates.get(member) ?? {
-              id: member,
-              name: member,
-              avatar: "",
-              ...data.users[member],
-              count: 0,
-              contributors: [],
-            };
-            candidate.contributors.push({
-              id,
-              name: id,
-              avatar: "",
-              ...data.users[id],
-            });
-            candidate.count++;
-            candidates.set(member, candidate);
-          }
+          candidates = addContributions(
+            candidates,
+            snapshot.members.map(user),
+            user(id),
+            excludedIds,
+          );
         }
         return {
-          results: [...candidates.values()].sort(
-            (a, b) =>
-              b.count - a.count || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-          ),
+          results: rankCandidates(candidates),
           complete: true,
           earliest: Math.min(
             ...snapshots.map((snapshot) => snapshot.fetchedAt),

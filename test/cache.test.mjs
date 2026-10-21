@@ -94,6 +94,78 @@ test("a successful scan persists raw relationships and refresh reuses complete c
   );
 });
 
+test("live and cached rankings preserve exclusions, distinct contributors and identifier tie order in all four directions", async (t) => {
+  const graph = {
+    "alice/friends": ["bob", "carol", "bob"],
+    "alice/rev_friends": ["dana", "erin", "dana"],
+    "bob/friends": ["alice", "carol", "x", "x", "y", "zed"],
+    "carol/friends": ["bob", "x"],
+    "bob/rev_friends": ["alice", "dana", "z", "z"],
+    "carol/rev_friends": ["z", "bob", "alpha"],
+    "dana/friends": ["alice", "bob", "w", "w"],
+    "erin/friends": ["w", "dana"],
+    "dana/rev_friends": ["alice", "erin", "v", "v"],
+    "erin/rev_friends": ["v", "bob"],
+  };
+  const cases = [
+    [
+      "friends/friends",
+      [
+        ["x", "2", ["bob", "carol"]],
+        ["y", "1", ["bob"]],
+        ["zed", "1", ["bob"]],
+      ],
+    ],
+    [
+      "friends/rev_friends",
+      [
+        ["z", "2", ["bob", "carol"]],
+        ["alpha", "1", ["carol"]],
+        ["bob", "1", ["carol"]],
+      ],
+    ],
+    [
+      "rev_friends/friends",
+      [
+        ["w", "2", ["dana", "erin"]],
+        ["dana", "1", ["erin"]],
+      ],
+    ],
+    [
+      "rev_friends/rev_friends",
+      [
+        ["v", "2", ["dana", "erin"]],
+        ["bob", "1", ["erin"]],
+      ],
+    ],
+  ];
+  const ranking = (app) =>
+    rows(app).map((_, index) => {
+      rows(app)[index].querySelector("button").click();
+      const expanded = rows(app)[index];
+      return [
+        expanded.querySelector("a").getAttribute("href").slice(6),
+        expanded.querySelector(".count").textContent,
+        [...expanded.querySelectorAll(".sdf-contributors a")]
+          .map((link) => link.getAttribute("href").slice(6))
+          .sort(),
+      ];
+    });
+  for (const [value, expected] of cases) {
+    const storage = sharedStorage();
+    const live = cachedComponent(t, storage, graph);
+    open(live);
+    mode(live, value);
+    await start(live);
+    assert.deepEqual(ranking(live), expected, `${value}: live`);
+    const cached = cachedComponent(t, storage, {});
+    open(cached);
+    mode(cached, value);
+    assert.deepEqual(ranking(cached), expected, `${value}: cached`);
+    assert.equal(cached.requests.length, 0);
+  }
+});
+
 test("all four cached directions require every root and intermediate snapshot, while explicit empty sets are complete", async (t) => {
   const storage = sharedStorage();
   const graph = {
