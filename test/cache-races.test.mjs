@@ -144,7 +144,7 @@ test("stopping while a completed scan waits for transaction completion preserves
   assert.equal(app.document.querySelectorAll("[data-medal]").length, 0);
   const refreshed = discovery(t, storage);
   open(refreshed);
-  await waitFor(() => /^缓存：/.test(status(refreshed)));
+  await waitFor(() => /^已载入缓存 · /.test(status(refreshed)));
   assert.equal(
     refreshed.document.querySelector("ol > li").dataset.userId,
     "old",
@@ -168,6 +168,10 @@ test("a failed asynchronous cache read cannot hide rate-limit cooldown after a m
   select.dispatchEvent(new app.window.Event("change"));
   await time.tick(0);
   assert.match(status(app), /429.*冷却/);
+  assert.match(
+    app.document.querySelector(".sdf-empty").textContent,
+    /缓存读取失败/,
+  );
   assert.equal(button(app.document, "开始寻找").disabled, true);
   assert.equal(app.requests.length, 1);
 });

@@ -97,7 +97,7 @@ test("modal keyboard focus and scroll stay contained until Esc hides without sto
   dialog.click();
   assert.equal(dialog.hidden, false, "backdrop clicks do not hide");
   const first = button(document, "停止寻找");
-  const last = button(document, "关闭");
+  const last = dialog.querySelector('[aria-label="候选用户列表"]');
   last.focus();
   last.dispatchEvent(
     new window.KeyboardEvent("keydown", {
@@ -197,7 +197,7 @@ test("candidate expansion explains distinct counted intermediates with safe curr
     document.querySelector('[role="status"]').textContent.startsWith("完成"),
   );
   const row = link(document, "候选显示名").closest("li");
-  const toggle = button(row, "展开贡献者");
+  const toggle = button(row, "展开");
   assert.ok(toggle, "separate disclosure button");
   assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal(row.querySelectorAll("img").length, 1);
@@ -211,10 +211,7 @@ test("candidate expansion explains distinct counted intermediates with safe curr
   );
   toggle.click();
   const expanded = link(document, "候选显示名").closest("li");
-  assert.equal(
-    button(expanded, "收起贡献者").getAttribute("aria-expanded"),
-    "true",
-  );
+  assert.equal(button(expanded, "收起").getAttribute("aria-expanded"), "true");
   assert.equal(expanded.querySelector(".count").textContent, "2");
   assert.deepEqual(
     [...expanded.querySelectorAll("a")].map((a) => a.getAttribute("href")),
@@ -233,7 +230,7 @@ test("candidate expansion explains distinct counted intermediates with safe curr
       "https://lain.bgm.tv/pic/user/l/custom_bob.jpg?r=7&hd=1",
     );
   }
-  button(expanded, "收起贡献者").click();
+  button(expanded, "收起").click();
   assert.equal(
     link(document, "候选显示名").closest("li").querySelectorAll("img").length,
     1,
@@ -295,7 +292,7 @@ test("contributor avatars load forty at a time and eventually expose every count
   await waitFor(() =>
     document.querySelector('[role="status"]').textContent.startsWith("完成"),
   );
-  button(document, "展开贡献者").click();
+  button(document, "展开").click();
   const row = () => document.querySelector("ol > li");
   assert.equal(row().querySelector(".count").textContent, "83");
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
@@ -310,8 +307,8 @@ test("contributor avatars load forty at a time and eventually expose every count
     "/user/middle-082",
   );
   assert.equal(button(row(), "显示更多头像"), undefined);
-  button(row(), "收起贡献者").click();
-  button(row(), "展开贡献者").click();
+  button(row(), "收起").click();
+  button(row(), "展开").click();
   assert.equal(
     row().querySelectorAll(".sdf-contributors a").length,
     83,
@@ -355,7 +352,7 @@ test("live reordering keeps expansion with the candidate and retains loaded rank
   );
   button(document, "显示更多").click();
   let alpha = link(document, "alpha").closest("li");
-  button(alpha, "展开贡献者").click();
+  button(alpha, "展开").click();
   alpha = link(document, "alpha").closest("li");
   button(alpha, "显示更多头像").click();
   for (let i = 41; i < 83; i++) {
@@ -373,17 +370,13 @@ test("live reordering keeps expansion with the candidate and retains loaded rank
     "/user/zed",
   );
   assert.equal(alpha.querySelector(".count").textContent, "42");
-  assert.equal(
-    button(alpha, "收起贡献者").getAttribute("aria-expanded"),
-    "true",
-  );
+  assert.equal(button(alpha, "收起").getAttribute("aria-expanded"), "true");
   assert.equal(alpha.querySelectorAll(".sdf-contributors a").length, 42);
   assert.equal(document.querySelectorAll("ol > li").length, 53);
   assert.equal(
-    button(
-      link(document, "候选显示名").closest("li"),
-      "展开贡献者",
-    ).getAttribute("aria-expanded"),
+    button(link(document, "候选显示名").closest("li"), "展开").getAttribute(
+      "aria-expanded",
+    ),
     "false",
   );
   assert.equal(requests.length, 84);
@@ -416,8 +409,8 @@ test("new scans and mode changes reset collapsed candidates and both batch sizes
     );
     assert.equal(document.querySelectorAll("ol > li").length, 50);
     const row = () => link(document, "候选显示名").closest("li");
-    assert.ok(button(row(), "展开贡献者"));
-    button(row(), "展开贡献者").click();
+    assert.ok(button(row(), "展开"));
+    button(row(), "展开").click();
     assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
     button(row(), "显示更多头像").click();
     button(document, "显示更多").click();
@@ -447,15 +440,15 @@ test("keyboard disclosure keeps focus through expansion and live result rebuildi
   button(document, "开始寻找").click();
   await waitFor(() => pending.size === 2);
   pending.get("bob")(response(relationship("bob", ["zed"])));
-  await waitFor(() => button(document, "展开贡献者"));
-  const toggle = button(document, "展开贡献者");
+  await waitFor(() => button(document, "展开"));
+  const toggle = button(document, "展开");
   toggle.focus();
   toggle.click();
-  assert.equal(document.activeElement, button(document, "收起贡献者"));
+  assert.equal(document.activeElement, button(document, "收起"));
   assert.equal(document.querySelectorAll("[data-medal]").length, 0);
   pending.get("carol")(response(relationship("carol", ["zed"])));
   await waitFor(() => button(document, "开始寻找"));
-  assert.equal(document.activeElement, button(document, "收起贡献者"));
+  assert.equal(document.activeElement, button(document, "收起"));
   assert.equal(document.querySelectorAll(".sdf-contributors a").length, 2);
   assert.equal(document.querySelectorAll("[data-medal]").length, 1);
 });
@@ -495,7 +488,7 @@ test("expanding incomplete mixed-direction results never awards medals or includ
       .querySelector('[role="status"]')
       .textContent.startsWith("读取失败"),
   );
-  button(document, "展开贡献者").click();
+  button(document, "展开").click();
   assert.equal(document.querySelector(".count").textContent, "2");
   assert.deepEqual(
     [...document.querySelectorAll(".sdf-contributors a")].map((a) =>
@@ -509,7 +502,7 @@ test("expanding incomplete mixed-direction results never awards medals or includ
     "SecondDegreeFriends 二度好友发现",
   );
   assert.match(document.querySelector('[role="status"]').textContent, /未完成/);
-  button(document, "收起贡献者").click();
+  button(document, "收起").click();
   assert.equal(document.querySelectorAll("[data-medal]").length, 0);
   assert.equal(requests.length, 5);
 });
@@ -546,14 +539,16 @@ test("cached rankings disclose exact contributors and mode changes reset both ca
   });
   link(document, "二度好友发现").click();
   await waitFor(() =>
-    document.querySelector('[role="status"]').textContent.startsWith("缓存："),
+    document
+      .querySelector('[role="status"]')
+      .textContent.startsWith("已载入缓存 · "),
   );
   assert.match(
     document.querySelector('[role="status"]').textContent,
-    /^缓存：/,
+    /^已载入缓存 · /,
   );
   const row = () => link(document, "候选显示名").closest("li");
-  button(row(), "展开贡献者").click();
+  button(row(), "展开").click();
   assert.equal(row().querySelector(".count").textContent, "42");
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
   button(row(), "显示更多头像").click();
@@ -580,8 +575,8 @@ test("cached rankings disclose exact contributors and mode changes reset both ca
   mode.dispatchEvent(new window.Event("change"));
   await waitFor(() => document.querySelectorAll("ol > li").length === 50);
   assert.equal(document.querySelectorAll("ol > li").length, 50);
-  assert.ok(button(row(), "展开贡献者"));
-  button(row(), "展开贡献者").click();
+  assert.ok(button(row(), "展开"));
+  button(row(), "展开").click();
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
   assert.equal(document.querySelectorAll("[data-medal]").length, 3);
   assert.deepEqual(requests, []);

@@ -102,7 +102,7 @@ test("blank display names preserve intermediates and candidates without identifi
       assert.equal(candidate.textContent, "");
       assert.equal(candidate.title, "");
       assert.equal(row.querySelector(".count").textContent, "1");
-      button(row, "展开贡献者").click();
+      button(row, "展开").click();
       const contributor = document.querySelector(
         'li[data-user-id="zed"] a[href="/user/bob"]',
       );

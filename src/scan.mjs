@@ -48,9 +48,15 @@ export async function scanRelationships(
   const publish = () => {
     signal.throwIfAborted();
     const results = rankCandidates(candidates);
-    const progress = `${succeeded + failed}/${intermediates.length}，成功 ${succeeded}，失败 ${failed}`;
-    update(results, progress);
-    return { results, progress, complete: failed === 0 };
+    const counts = {
+      processed: succeeded + failed,
+      total: intermediates.length,
+      succeeded,
+      failed,
+    };
+    const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}`;
+    update(results, progress, counts);
+    return { results, progress, counts, complete: failed === 0 };
   };
   publish();
   const worker = async () => {

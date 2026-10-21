@@ -37,7 +37,8 @@ export function link(document, text) {
 
 export function button(document, text) {
   return [...document.querySelectorAll("button")].find(
-    (node) => node.textContent === text,
+    (node) =>
+      node.getAttribute("aria-label") === text || node.textContent === text,
   );
 }
 

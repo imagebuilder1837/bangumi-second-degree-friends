@@ -116,7 +116,7 @@ test("all four directions reuse complete cached rankings, exclusions and distinc
     await mode(refreshed, value);
     assert.deepEqual(ranking(refreshed), expected);
     assert.equal(rows(refreshed)[0].dataset.medal, "gold");
-    assert.match(status(refreshed), /^缓存：/);
+    assert.match(status(refreshed), /^已载入缓存 · /);
     assert.equal(refreshed.requests.length, 0);
     if (value === "friends/friends") {
       assert.equal(
@@ -290,6 +290,6 @@ test("cross-mode root replacement requires new intermediate snapshots and cached
   );
   await open(refreshed);
   await mode(refreshed, "friends/rev_friends");
-  assert.match(status(refreshed), /缓存：0 位候选用户/);
+  assert.match(status(refreshed), /已载入缓存 · 0 位候选用户/);
   assert.equal(refreshed.requests.length, 0);
 });
