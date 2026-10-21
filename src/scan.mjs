@@ -48,7 +48,12 @@ export async function scanRelationships(
         const members = await read(intermediary.id, url);
         for (const user of members.values()) {
           if (user.id === home.id || excluded.has(user.id)) continue;
-          const candidate = candidates.get(user.id) ?? { ...user, count: 0 };
+          const candidate = candidates.get(user.id) ?? {
+            ...user,
+            count: 0,
+            contributors: [],
+          };
+          candidate.contributors.push(intermediary);
           candidate.count++;
           candidates.set(user.id, candidate);
         }
