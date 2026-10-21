@@ -31,7 +31,7 @@ test("basic dialog can be closed and reopened without relationship requests", (t
   assert.deepEqual(requests, []);
 });
 
-test("hidden scans keep publishing entry progress and completion, and reopen the same mode and results", async (t) => {
+test("hidden scans keep progress and completion only in the dialog, and reopen the same mode and results", async (t) => {
   const pending = new Map();
   const { document, window, requests } = component(t, {
     respond: (url) => {
@@ -53,7 +53,11 @@ test("hidden scans keep publishing entry progress and completion, and reopen the
   pending.get("bob")(response(relationship("bob", ["zed"])));
   await waitFor(() => document.querySelector("ol .count"));
   assert.ok(dialog.hidden);
-  assert.match(entry.closest("li").textContent, /1\/2/);
+  assert.equal(
+    entry.closest("li").textContent,
+    "SecondDegreeFriends 二度好友发现",
+  );
+  assert.match(dialog.querySelector('[role="status"]').textContent, /1\/2/);
   entry.click();
   assert.equal(mode.value, "rev_friends/rev_friends");
   assert.equal(document.querySelector("ol .count").textContent, "1");
@@ -63,7 +67,11 @@ test("hidden scans keep publishing entry progress and completion, and reopen the
   pending.get("carol")(response(relationship("carol", ["zed"])));
   await waitFor(() => button(document, "开始寻找"));
   assert.ok(dialog.hidden, "completion never opens the dialog");
-  assert.match(entry.closest("li").textContent, /完成/);
+  assert.equal(
+    entry.closest("li").textContent,
+    "SecondDegreeFriends 二度好友发现",
+  );
+  assert.match(dialog.querySelector('[role="status"]').textContent, /完成/);
   entry.click();
   assert.equal(document.querySelector("ol .count").textContent, "2");
   assert.equal(requests.length, 3);
@@ -126,7 +134,11 @@ test("modal keyboard focus and scroll stay contained until Esc hides without sto
   button(document, "停止寻找").click();
   await waitFor(() => button(document, "开始寻找"));
   assert.ok(signal.aborted, "explicit stop cancels the request");
-  assert.match(entry.closest("li").textContent, /未完成/);
+  assert.equal(
+    entry.closest("li").textContent,
+    "SecondDegreeFriends 二度好友发现",
+  );
+  assert.match(dialog.querySelector('[role="status"]').textContent, /未完成/);
   button(document, "关闭").click();
   assert.equal(document.activeElement, entry);
 });
@@ -492,10 +504,11 @@ test("expanding incomplete mixed-direction results never awards medals or includ
     ["/user/bob", "/user/carol"],
   );
   assert.equal(document.querySelectorAll("[data-medal]").length, 0);
-  assert.match(
+  assert.equal(
     link(document, "二度好友发现").closest("li").textContent,
-    /未完成/,
+    "SecondDegreeFriends 二度好友发现",
   );
+  assert.match(document.querySelector('[role="status"]').textContent, /未完成/);
   button(document, "收起贡献者").click();
   assert.equal(document.querySelectorAll("[data-medal]").length, 0);
   assert.equal(requests.length, 5);

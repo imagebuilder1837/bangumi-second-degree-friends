@@ -44,7 +44,6 @@ export function mountView(window, entry, scan, cached = () => undefined) {
   });
   const style = document.createElement("style");
   style.textContent = `
-    #second-degree-friends-entry .sdf-entry-status { margin-left: 4px; }
     #second-degree-friends-dialog { --sdf-bg: #fff; --sdf-text: #333; --sdf-border: #ddd; --sdf-soft: #f6f6f6; position: fixed; inset: 0; z-index: 10000; background: #0007; padding: 16px; color: var(--sdf-text); font: 13px/1.6 system-ui, sans-serif; }
     #second-degree-friends-dialog:not([hidden]) { display: grid; place-items: center; }
     #second-degree-friends-dialog .sdf-panel { box-sizing: border-box; width: min(720px, 100%); max-height: min(85vh, 900px); overflow: auto; overscroll-behavior: contain; padding: 20px; background: var(--sdf-bg); border: 1px solid var(--sdf-border); border-radius: 12px; box-shadow: 0 4px 24px #0004; }
@@ -84,12 +83,8 @@ export function mountView(window, entry, scan, cached = () => undefined) {
   document.head.append(style);
   const start = dialog.querySelector("button");
   const status = dialog.querySelector('[role="status"]');
-  const entryStatus = document.createElement("span");
-  entryStatus.className = "tip sdf-entry-status";
-  entry.after(entryStatus);
-  const setStatus = (text, brief = text) => {
+  const setStatus = (text) => {
     status.textContent = text;
-    entryStatus.textContent = ` · ${brief}`;
   };
   const expanded = new Set();
   let visibleRanks = 50;
@@ -211,7 +206,6 @@ export function mountView(window, entry, scan, cached = () => undefined) {
       outcome
         ? `缓存：${outcome.results.length} 位候选用户；关系获取时间 ${new window.Date(outcome.earliest).toISOString()} — ${new window.Date(outcome.latest).toISOString()}`
         : "缓存不足，请主动开始寻找",
-      outcome ? `缓存完整 · ${outcome.results.length} 人` : "缓存不足",
     );
     viewed = true;
   };
@@ -222,7 +216,7 @@ export function mountView(window, entry, scan, cached = () => undefined) {
     }
     showCached();
     if (window.Date.now() < cooldownUntil)
-      setStatus("HTTP 429，冷却中；冷却结束后请手动开始", "冷却中");
+      setStatus("HTTP 429，冷却中；冷却结束后请手动开始");
   });
   start.addEventListener("click", async () => {
     if (start.disabled || window.Date.now() < cooldownUntil) return;
@@ -266,13 +260,12 @@ export function mountView(window, entry, scan, cached = () => undefined) {
           if (task !== current || current.controller.signal.aborted) return;
           current.progress = progress;
           render(results);
-          setStatus(`正在寻找：${progress}`, `寻找 ${progress.split("，")[0]}`);
+          setStatus(`正在寻找：${progress}`);
         },
       });
       render(outcome.results, outcome.complete);
       setStatus(
         `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
-        `${outcome.complete ? "完成" : "未完成"} · ${outcome.results.length} 人`,
       );
     } catch (error) {
       let message = current.rateLimited
@@ -281,7 +274,7 @@ export function mountView(window, entry, scan, cached = () => undefined) {
           ? "已停止，结果未完成"
           : `读取失败，未完成：${error.message}`;
       if (current.progress) message += `；${current.progress}`;
-      setStatus(message, current.rateLimited ? "冷却中 · 未完成" : "未完成");
+      setStatus(message);
     } finally {
       task = undefined;
       start.textContent = "开始寻找";
