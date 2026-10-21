@@ -9,7 +9,7 @@ const home = await readFile(
 
 export function component(
   t,
-  { url = "https://bgm.tv/user/alice", html = home, respond } = {},
+  { url = "https://bgm.tv/user/alice", html = home, respond, configure } = {},
 ) {
   const dom = new JSDOM(html, { url });
   dom.window.CHOBITS_UID = 999;
@@ -21,6 +21,7 @@ export function component(
     if (!respond) throw new Error("Unexpected network request");
     return respond(String(url), options);
   };
+  configure?.(dom.window);
   initialize(dom.window);
   dom.window.document.dispatchEvent(new dom.window.Event("DOMContentLoaded"));
   return { window: dom.window, document: dom.window.document, requests };

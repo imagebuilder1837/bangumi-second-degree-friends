@@ -27,10 +27,20 @@ export function readHome(document, base) {
     friendsUrl.pathname !== `/user/${encodeURIComponent(id)}/friends`
   )
     throw new Error("好友链接身份不匹配");
-  return { id, friendsUrl: friendsUrl.href };
+  const reverse = document.querySelector('#friend a[href$="/rev_friends"]');
+  let reverseUrl;
+  if (reverse) {
+    reverseUrl = new URL(reverse.getAttribute("href"), base);
+    if (
+      reverseUrl.origin !== friendsUrl.origin ||
+      reverseUrl.pathname !== `/user/${encodeURIComponent(id)}/rev_friends`
+    )
+      throw new Error("反向好友链接身份不匹配");
+  }
+  return { id, friendsUrl: friendsUrl.href, reverseUrl: reverseUrl?.href };
 }
 
-export function readFriends(window, html, owner, base) {
+export function readRelationships(window, html, owner, base) {
   const document = new window.DOMParser().parseFromString(html, "text/html");
   if (identity(document, base) !== owner) throw new Error("关系页面身份不匹配");
   const list = document.querySelector("#memberUserList.usersMedium");
