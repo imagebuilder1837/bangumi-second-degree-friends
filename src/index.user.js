@@ -249,10 +249,27 @@
       if (!url) throw new Error("缺少主页关系列表链接");
       return url;
     };
+    const staged = {
+      relationships: Object.create(null),
+      users: Object.create(null),
+    };
     const read = async (id, url) => {
       const text = await requestText(window, url, signal, rateLimited);
       signal.throwIfAborted();
-      return readRelationships(window, text, id, url);
+      const members = readRelationships(window, text, id, url);
+      const direction = new URL(url).pathname.split("/").at(-1);
+      staged.relationships[id] ??= Object.create(null);
+      staged.relationships[id][direction] = {
+        members: [...members.keys()],
+        fetchedAt: window.Date.now(),
+      };
+      for (const user of members.values())
+        staged.users[user.id] = {
+          name: user.name,
+          avatar: user.avatar,
+          fetchedAt: window.Date.now(),
+        };
+      return members;
     };
     const firstMembers = await read(home.id, homeUrl(first));
     const excluded =
@@ -299,10 +316,10 @@
     await Promise.all(
       Array.from({ length: Math.min(4, intermediates.length) }, worker),
     );
-    return publish();
+    return { ...publish(), staged };
   }
 
-  function mountView(window, entry, scan) {
+  function mountView(window, entry, scan, cached = () => undefined) {
     const { document } = window;
     const dialog = document.createElement("section");
     dialog.id = "second-degree-friends-dialog";
@@ -355,16 +372,23 @@
     const mode = dialog.querySelector("select");
     let task;
     let cooldownUntil = 0;
+    let viewed = false;
+    const showCached = () => {
+      const outcome = cached(mode.value);
+      render(outcome?.results ?? [], Boolean(outcome));
+      status.textContent = outcome
+        ? `缓存：${outcome.results.length} 位候选用户；关系获取时间 ${new window.Date(outcome.earliest).toISOString()} — ${new window.Date(outcome.latest).toISOString()}`
+        : "缓存不足，请主动开始寻找";
+      viewed = true;
+    };
     mode.addEventListener("change", () => {
       if (task) {
         mode.value = task.mode;
         return;
       }
-      render([]);
-      status.textContent =
-        window.Date.now() < cooldownUntil
-          ? "HTTP 429，冷却中；冷却结束后请手动开始"
-          : "尚未开始";
+      showCached();
+      if (window.Date.now() < cooldownUntil)
+        status.textContent = "HTTP 429，冷却中；冷却结束后请手动开始";
     });
     start.addEventListener("click", async () => {
       if (start.disabled || window.Date.now() < cooldownUntil) return;
@@ -411,7 +435,7 @@
           },
         });
         render(outcome.results, outcome.complete);
-        status.textContent = `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}`;
+        status.textContent = `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`;
       } catch (error) {
         status.textContent = current.rateLimited
           ? "HTTP 429，冷却中，结果未完成；冷却结束后请手动开始"
@@ -428,8 +452,159 @@
     document.body.append(dialog);
     entry.addEventListener("click", (event) => {
       event.preventDefault();
+      if (!viewed) showCached();
       dialog.hidden = false;
     });
+  }
+
+  const key = "second-degree-friends:relationships";
+  const dictionary = () => Object.create(null);
+  const empty = () => ({
+    version: 1,
+    relationships: dictionary(),
+    users: dictionary(),
+  });
+  const record = (value) =>
+    value && typeof value === "object" && !Array.isArray(value);
+  const timestamp = (value) =>
+    Number.isFinite(value) && value >= 0 && value <= 8640000000000000;
+  const identifier = (value) => typeof value === "string" && value.length > 0;
+
+  function validated(value) {
+    const data = empty();
+    if (
+      value?.version !== 1 ||
+      !record(value.relationships) ||
+      !record(value.users)
+    )
+      return data;
+    for (const [id, directions] of Object.entries(value.relationships)) {
+      if (!identifier(id) || !record(directions)) continue;
+      for (const direction of ["friends", "rev_friends"]) {
+        const snapshot = directions[direction];
+        if (
+          !record(snapshot) ||
+          !timestamp(snapshot.fetchedAt) ||
+          !Array.isArray(snapshot.members) ||
+          !snapshot.members.every(identifier)
+        )
+          continue;
+        data.relationships[id] ??= dictionary();
+        data.relationships[id][direction] = {
+          members: [...new Set(snapshot.members)],
+          fetchedAt: snapshot.fetchedAt,
+        };
+      }
+    }
+    for (const [id, user] of Object.entries(value.users)) {
+      if (
+        !record(user) ||
+        typeof user.name !== "string" ||
+        typeof user.avatar !== "string" ||
+        !/^https?:\/\//.test(user.avatar) ||
+        !timestamp(user.fetchedAt)
+      )
+        continue;
+      data.users[id] = {
+        name: user.name,
+        avatar: user.avatar,
+        fetchedAt: user.fetchedAt,
+      };
+    }
+    return data;
+  }
+
+  function read(window, required = false) {
+    let text;
+    try {
+      text = window.localStorage.getItem(key);
+    } catch (error) {
+      if (required) throw error;
+      return empty();
+    }
+    try {
+      return validated(JSON.parse(text));
+    } catch {
+      return empty();
+    }
+  }
+
+  function relationshipCache(window, home) {
+    let data = read(window);
+    return {
+      lookup(mode) {
+        const [first, second] = mode.split("/");
+        const initial = data.relationships[home.id]?.[first];
+        const excluded = data.relationships[home.id]?.[second];
+        if (!initial || !excluded) return;
+        const snapshots = [initial, excluded];
+        const candidates = new Map();
+        for (const id of initial.members) {
+          const snapshot = data.relationships[id]?.[second];
+          if (!snapshot) return;
+          snapshots.push(snapshot);
+          for (const member of snapshot.members) {
+            if (member === home.id || excluded.members.includes(member))
+              continue;
+            const candidate = candidates.get(member) ?? {
+              id: member,
+              name: member,
+              avatar: "",
+              ...data.users[member],
+              count: 0,
+            };
+            candidate.count++;
+            candidates.set(member, candidate);
+          }
+        }
+        return {
+          results: [...candidates.values()].sort(
+            (a, b) =>
+              b.count - a.count || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          ),
+          complete: true,
+          earliest: Math.min(
+            ...snapshots.map((snapshot) => snapshot.fetchedAt),
+          ),
+          latest: Math.max(...snapshots.map((snapshot) => snapshot.fetchedAt)),
+        };
+      },
+      async commit(staged, signal) {
+        if (
+          typeof window.localStorage?.getItem !== "function" ||
+          typeof window.localStorage?.setItem !== "function" ||
+          typeof window.navigator.locks?.request !== "function"
+        )
+          throw new Error("无法安全保存缓存");
+        await window.navigator.locks.request(
+          key,
+          { mode: "exclusive", signal },
+          () => {
+            signal.throwIfAborted();
+            const merged = read(window, true);
+            for (const [id, directions] of Object.entries(
+              staged.relationships,
+            )) {
+              merged.relationships[id] ??= dictionary();
+              for (const [direction, snapshot] of Object.entries(directions)) {
+                const previous = merged.relationships[id][direction];
+                if (!previous || snapshot.fetchedAt >= previous.fetchedAt)
+                  merged.relationships[id][direction] = snapshot;
+              }
+            }
+            for (const [id, user] of Object.entries(staged.users)) {
+              if (
+                !merged.users[id] ||
+                user.fetchedAt >= merged.users[id].fetchedAt
+              )
+                merged.users[id] = user;
+            }
+            window.localStorage.setItem(key, JSON.stringify(merged));
+            data = merged;
+          },
+        );
+      },
+    };
   }
 
   function initialize(window) {
@@ -457,8 +632,23 @@
       item.innerHTML =
         '<span class="service" style="background-color:#b58a00;color:#fff">SecondDegreeFriends</span> <span class="tip"><a class="l" href="#">二度好友发现</a></span>';
       services.append(item);
-      mountView(window, item.querySelector("a"), (mode, options) =>
-        scanRelationships(window, home, mode, options),
+      const cache = relationshipCache(window, home);
+      mountView(
+        window,
+        item.querySelector("a"),
+        async (mode, options) => {
+          const outcome = await scanRelationships(window, home, mode, options);
+          if (outcome.complete) {
+            try {
+              await cache.commit(outcome.staged, options.signal);
+            } catch {
+              options.signal.throwIfAborted();
+              outcome.saveWarning = "缓存保存失败，旧缓存保留";
+            }
+          }
+          return outcome;
+        },
+        (mode) => cache.lookup(mode),
       );
     };
     if (document.readyState === "loading")

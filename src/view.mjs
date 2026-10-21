@@ -1,4 +1,4 @@
-export function mountView(window, entry, scan) {
+export function mountView(window, entry, scan, cached = () => undefined) {
   const { document } = window;
   const dialog = document.createElement("section");
   dialog.id = "second-degree-friends-dialog";
@@ -51,16 +51,23 @@ export function mountView(window, entry, scan) {
   const mode = dialog.querySelector("select");
   let task;
   let cooldownUntil = 0;
+  let viewed = false;
+  const showCached = () => {
+    const outcome = cached(mode.value);
+    render(outcome?.results ?? [], Boolean(outcome));
+    status.textContent = outcome
+      ? `缓存：${outcome.results.length} 位候选用户；关系获取时间 ${new window.Date(outcome.earliest).toISOString()} — ${new window.Date(outcome.latest).toISOString()}`
+      : "缓存不足，请主动开始寻找";
+    viewed = true;
+  };
   mode.addEventListener("change", () => {
     if (task) {
       mode.value = task.mode;
       return;
     }
-    render([]);
-    status.textContent =
-      window.Date.now() < cooldownUntil
-        ? "HTTP 429，冷却中；冷却结束后请手动开始"
-        : "尚未开始";
+    showCached();
+    if (window.Date.now() < cooldownUntil)
+      status.textContent = "HTTP 429，冷却中；冷却结束后请手动开始";
   });
   start.addEventListener("click", async () => {
     if (start.disabled || window.Date.now() < cooldownUntil) return;
@@ -107,7 +114,7 @@ export function mountView(window, entry, scan) {
         },
       });
       render(outcome.results, outcome.complete);
-      status.textContent = `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}`;
+      status.textContent = `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`;
     } catch (error) {
       status.textContent = current.rateLimited
         ? "HTTP 429，冷却中，结果未完成；冷却结束后请手动开始"
@@ -124,6 +131,7 @@ export function mountView(window, entry, scan) {
   document.body.append(dialog);
   entry.addEventListener("click", (event) => {
     event.preventDefault();
+    if (!viewed) showCached();
     dialog.hidden = false;
   });
 }

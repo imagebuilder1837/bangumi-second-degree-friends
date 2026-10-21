@@ -13,10 +13,27 @@ export async function scanRelationships(
     if (!url) throw new Error("缺少主页关系列表链接");
     return url;
   };
+  const staged = {
+    relationships: Object.create(null),
+    users: Object.create(null),
+  };
   const read = async (id, url) => {
     const text = await requestText(window, url, signal, rateLimited);
     signal.throwIfAborted();
-    return readRelationships(window, text, id, url);
+    const members = readRelationships(window, text, id, url);
+    const direction = new URL(url).pathname.split("/").at(-1);
+    staged.relationships[id] ??= Object.create(null);
+    staged.relationships[id][direction] = {
+      members: [...members.keys()],
+      fetchedAt: window.Date.now(),
+    };
+    for (const user of members.values())
+      staged.users[user.id] = {
+        name: user.name,
+        avatar: user.avatar,
+        fetchedAt: window.Date.now(),
+      };
+    return members;
   };
   const firstMembers = await read(home.id, homeUrl(first));
   const excluded =
@@ -63,5 +80,5 @@ export async function scanRelationships(
   await Promise.all(
     Array.from({ length: Math.min(4, intermediates.length) }, worker),
   );
-  return publish();
+  return { ...publish(), staged };
 }
