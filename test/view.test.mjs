@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { sharedStorage } from "./support/storage.mjs";
 import {
   component,
   link,
@@ -498,4 +499,73 @@ test("expanding incomplete mixed-direction results never awards medals or includ
   button(document, "收起贡献者").click();
   assert.equal(document.querySelectorAll("[data-medal]").length, 0);
   assert.equal(requests.length, 5);
+});
+
+test("cached rankings disclose exact contributors and mode changes reset both cached batch sizes", async (t) => {
+  const storage = sharedStorage();
+  const middles = Array.from({ length: 42 }, (_, i) => `middle${i}`);
+  const candidates = Array.from({ length: 102 }, (_, i) => `candidate${i}`);
+  const app = component(t, {
+    configure: storage.install,
+    respond: (url) => {
+      const owner = new URL(url).pathname.split("/")[2];
+      return response(
+        relationship(
+          owner,
+          owner === "alice"
+            ? middles
+            : owner === "middle0"
+              ? ["zed", ...candidates]
+              : ["zed", "zed"],
+        ),
+      );
+    },
+  });
+  link(app.document, "二度好友发现").click();
+  button(app.document, "开始寻找").click();
+  await waitFor(() =>
+    app.document
+      .querySelector('[role="status"]')
+      .textContent.startsWith("完成"),
+  );
+  const { document, window, requests } = component(t, {
+    configure: storage.install,
+  });
+  link(document, "二度好友发现").click();
+  assert.match(
+    document.querySelector('[role="status"]').textContent,
+    /^缓存：/,
+  );
+  const row = () => link(document, "候选显示名").closest("li");
+  button(row(), "展开贡献者").click();
+  assert.equal(row().querySelector(".count").textContent, "42");
+  assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
+  button(row(), "显示更多头像").click();
+  button(document, "显示更多").click();
+  assert.equal(row().querySelectorAll(".sdf-contributors a").length, 42);
+  assert.deepEqual(
+    [...row().querySelectorAll(".sdf-contributors a")]
+      .slice(0, 2)
+      .map((a) => a.getAttribute("href")),
+    ["/user/middle0", "/user/middle1"],
+  );
+  assert.equal(
+    row()
+      .querySelector(".sdf-contributors a:last-of-type")
+      .getAttribute("href"),
+    "/user/middle41",
+  );
+  assert.equal(document.querySelectorAll("ol > li").length, 100);
+  const mode = document.querySelector("select");
+  mode.value = "rev_friends/rev_friends";
+  mode.dispatchEvent(new window.Event("change"));
+  assert.equal(document.querySelectorAll("ol > li").length, 0);
+  mode.value = "friends/friends";
+  mode.dispatchEvent(new window.Event("change"));
+  assert.equal(document.querySelectorAll("ol > li").length, 50);
+  assert.ok(button(row(), "展开贡献者"));
+  button(row(), "展开贡献者").click();
+  assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
+  assert.equal(document.querySelectorAll("[data-medal]").length, 3);
+  assert.deepEqual(requests, []);
 });

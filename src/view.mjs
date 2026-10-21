@@ -1,4 +1,4 @@
-export function mountView(window, entry, scan) {
+export function mountView(window, entry, scan, cached = () => undefined) {
   const { document } = window;
   const dialog = document.createElement("section");
   dialog.id = "second-degree-friends-dialog";
@@ -202,17 +202,27 @@ export function mountView(window, entry, scan) {
   let task;
   window.addEventListener("pagehide", () => task?.controller.abort());
   let cooldownUntil = 0;
+  let viewed = false;
+  const showCached = () => {
+    const outcome = cached(mode.value);
+    resetResults();
+    render(outcome?.results ?? [], Boolean(outcome));
+    setStatus(
+      outcome
+        ? `缓存：${outcome.results.length} 位候选用户；关系获取时间 ${new window.Date(outcome.earliest).toISOString()} — ${new window.Date(outcome.latest).toISOString()}`
+        : "缓存不足，请主动开始寻找",
+      outcome ? `缓存完整 · ${outcome.results.length} 人` : "缓存不足",
+    );
+    viewed = true;
+  };
   mode.addEventListener("change", () => {
     if (task) {
       mode.value = task.mode;
       return;
     }
-    resetResults();
-    setStatus(
-      window.Date.now() < cooldownUntil
-        ? "HTTP 429，冷却中；冷却结束后请手动开始"
-        : "尚未开始",
-    );
+    showCached();
+    if (window.Date.now() < cooldownUntil)
+      setStatus("HTTP 429，冷却中；冷却结束后请手动开始", "冷却中");
   });
   start.addEventListener("click", async () => {
     if (start.disabled || window.Date.now() < cooldownUntil) return;
@@ -261,7 +271,7 @@ export function mountView(window, entry, scan) {
       });
       render(outcome.results, outcome.complete);
       setStatus(
-        `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}`,
+        `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
         `${outcome.complete ? "完成" : "未完成"} · ${outcome.results.length} 人`,
       );
     } catch (error) {
@@ -282,6 +292,7 @@ export function mountView(window, entry, scan) {
   entry.addEventListener("click", (event) => {
     event.preventDefault();
     if (!dialog.hidden) return;
+    if (!viewed) showCached();
     scroll = {
       body: document.body.style.overflow,
       root: document.documentElement.style.overflow,

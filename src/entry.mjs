@@ -1,6 +1,7 @@
 import { readHome } from "./site.mjs";
 import { scanRelationships } from "./scan.mjs";
 import { mountView } from "./view.mjs";
+import { relationshipCache } from "./cache.mjs";
 
 export function initialize(window) {
   const { document, location } = window;
@@ -27,8 +28,23 @@ export function initialize(window) {
     item.innerHTML =
       '<span class="service" style="background-color:#b58a00;color:#fff">SecondDegreeFriends</span> <span class="tip"><a class="l" href="#">二度好友发现</a></span>';
     services.append(item);
-    mountView(window, item.querySelector("a"), (mode, options) =>
-      scanRelationships(window, home, mode, options),
+    const cache = relationshipCache(window, home);
+    mountView(
+      window,
+      item.querySelector("a"),
+      async (mode, options) => {
+        const outcome = await scanRelationships(window, home, mode, options);
+        if (outcome.complete) {
+          try {
+            await cache.commit(outcome.staged, options.signal);
+          } catch {
+            options.signal.throwIfAborted();
+            outcome.saveWarning = "缓存保存失败，旧缓存保留";
+          }
+        }
+        return outcome;
+      },
+      (mode) => cache.lookup(mode),
     );
   };
   if (document.readyState === "loading")
