@@ -2,7 +2,7 @@
 // @name         Bangumi 二度好友发现
 // @namespace    https://github.com/imagebuilder1837/bangumi-second-degree-friends
 // @version      0.1.0
-// @description  通过好友的好友、好友的反向好友、反向好友的好友及反向好友的反向好友，发现二度关系用户。
+// @description  发现那些 TA 的好友加了但 TA 没加的用户。
 // @author       imagebuilder1837
 // @match        https://bgm.tv/user/*
 // @match        https://bangumi.tv/user/*
@@ -78,8 +78,7 @@
       const anchor = item.querySelector(
         ".userContainer > strong > a.avatar[href]",
       );
-      if (!anchor || !anchor.textContent.trim())
-        throw new Error("无效的好友条目");
+      if (!anchor) throw new Error("无效的好友条目");
       const url = new URL(anchor.getAttribute("href"), base);
       const match = /^\/user\/([^/]+)$/.exec(url.pathname);
       if (url.origin !== new URL(base).origin || !match)

@@ -73,6 +73,45 @@ test("friends of friends exclude home and direct friends and count distinct inte
   ]);
 });
 
+test("blank display names preserve intermediates and candidates without identifier fallback", async (t) => {
+  for (const blank of ["", " ", "&nbsp;", "　"]) {
+    await t.test(JSON.stringify(blank), async (t) => {
+      const graph = { alice: ["bob"], bob: ["zed", "other"] };
+      const { document } = component(t, {
+        respond: (url) => {
+          const owner = new URL(url).pathname.split("/")[2];
+          const html = relationship(owner, graph[owner])
+            .replace(">bob</a>", `>${blank}</a>`)
+            .replace(">候选显示名</a>", `>${blank}</a>`);
+          return response(html);
+        },
+      });
+      link(document, "二度好友发现").click();
+      button(document, "开始寻找").click();
+      await waitFor(() =>
+        document.querySelector('[role="status"]').textContent.includes("完成"),
+      );
+      assert.match(
+        document.querySelector('[role="status"]').textContent,
+        /^完成.*成功 1，失败 0/,
+      );
+      const rows = document.querySelectorAll('[role="dialog"] ol > li');
+      assert.equal(rows.length, 2);
+      const row = document.querySelector('li[data-user-id="zed"]');
+      const candidate = row.querySelector('a[href="/user/zed"]');
+      assert.equal(candidate.textContent, "");
+      assert.equal(candidate.title, "");
+      assert.equal(row.querySelector(".count").textContent, "1");
+      button(row, "展开贡献者").click();
+      const contributor = document.querySelector(
+        'li[data-user-id="zed"] a[href="/user/bob"]',
+      );
+      assert.ok(contributor);
+      assert.equal(contributor.title, "");
+    });
+  }
+});
+
 test("invalid relationship pages and redirected identities never complete or award medals", async (t) => {
   const { readFile } = await import("node:fs/promises");
   const challenge = await readFile(

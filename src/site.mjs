@@ -57,8 +57,7 @@ export function readRelationships(window, html, owner, base) {
     const anchor = item.querySelector(
       ".userContainer > strong > a.avatar[href]",
     );
-    if (!anchor || !anchor.textContent.trim())
-      throw new Error("无效的好友条目");
+    if (!anchor) throw new Error("无效的好友条目");
     const url = new URL(anchor.getAttribute("href"), base);
     const match = /^\/user\/([^/]+)$/.exec(url.pathname);
     if (url.origin !== new URL(base).origin || !match)
