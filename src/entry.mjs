@@ -1,5 +1,5 @@
 import { readHome } from "./site.mjs";
-import { scanFriends } from "./scan.mjs";
+import { scanRelationships } from "./scan.mjs";
 import { mountView } from "./view.mjs";
 
 export function initialize(window) {
@@ -27,7 +27,9 @@ export function initialize(window) {
     item.innerHTML =
       '<span class="service" style="background-color:#b58a00;color:#fff">SecondDegreeFriends</span> <span class="tip"><a class="l" href="#">二度好友发现</a></span>';
     services.append(item);
-    mountView(window, item.querySelector("a"), () => scanFriends(window, home));
+    mountView(window, item.querySelector("a"), (mode, options) =>
+      scanRelationships(window, home, mode, options),
+    );
   };
   if (document.readyState === "loading")
     document.addEventListener("DOMContentLoaded", attach, { once: true });

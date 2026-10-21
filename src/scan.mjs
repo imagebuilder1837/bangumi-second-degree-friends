@@ -1,29 +1,67 @@
-import { readFriends } from "./site.mjs";
+import { readRelationships } from "./site.mjs";
+import { requestText } from "./requests.mjs";
 
-export async function scanFriends(window, home) {
-  const read = async (id, url) => {
-    const response = await window.fetch(url, { credentials: "same-origin" });
-    if (!response.ok) throw new Error("好友读取失败");
-    if (response.url && response.url !== url)
-      throw new Error("关系请求跳转到其他页面");
-    return readFriends(window, await response.text(), id, url);
+export async function scanRelationships(
+  window,
+  home,
+  mode,
+  { update, signal, rateLimited },
+) {
+  const [first, second] = mode.split("/");
+  const homeUrl = (direction) => {
+    const url = direction === "friends" ? home.friendsUrl : home.reverseUrl;
+    if (!url) throw new Error("缺少主页关系列表链接");
+    return url;
   };
-  const friends = await read(home.id, home.friendsUrl);
+  const read = async (id, url) => {
+    const text = await requestText(window, url, signal, rateLimited);
+    signal.throwIfAborted();
+    return readRelationships(window, text, id, url);
+  };
+  const firstMembers = await read(home.id, homeUrl(first));
+  const excluded =
+    first === second ? firstMembers : await read(home.id, homeUrl(second));
   const candidates = new Map();
-  for (const friend of friends.values()) {
-    const url = new URL(
-      `/user/${encodeURIComponent(friend.id)}/friends`,
-      home.friendsUrl,
-    ).href;
-    const members = await read(friend.id, url);
-    for (const user of members.values()) {
-      if (user.id === home.id || friends.has(user.id)) continue;
-      const candidate = candidates.get(user.id) ?? { ...user, count: 0 };
-      candidate.count++;
-      candidates.set(user.id, candidate);
+  const intermediates = [...firstMembers.values()];
+  let next = 0;
+  let succeeded = 0;
+  let failed = 0;
+  const publish = () => {
+    signal.throwIfAborted();
+    const results = [...candidates.values()].sort(
+      (a, b) => b.count - a.count || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+    const progress = `${succeeded + failed}/${intermediates.length}，成功 ${succeeded}，失败 ${failed}`;
+    update(results, progress);
+    return { results, progress, complete: failed === 0 };
+  };
+  publish();
+  const worker = async () => {
+    while (next < intermediates.length) {
+      signal.throwIfAborted();
+      const intermediary = intermediates[next++];
+      const url = new URL(
+        `/user/${encodeURIComponent(intermediary.id)}/${second}`,
+        home.friendsUrl,
+      ).href;
+      try {
+        const members = await read(intermediary.id, url);
+        for (const user of members.values()) {
+          if (user.id === home.id || excluded.has(user.id)) continue;
+          const candidate = candidates.get(user.id) ?? { ...user, count: 0 };
+          candidate.count++;
+          candidates.set(user.id, candidate);
+        }
+        succeeded++;
+      } catch {
+        signal.throwIfAborted();
+        failed++;
+      }
+      publish();
     }
-  }
-  return [...candidates.values()].sort(
-    (a, b) => b.count - a.count || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(4, intermediates.length) }, worker),
   );
+  return publish();
 }
