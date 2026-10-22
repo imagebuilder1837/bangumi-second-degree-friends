@@ -245,11 +245,7 @@ test("a complete empty graph shows an empty result, not an invitation to start a
   button(document, "开始寻找").click();
   await finished(document);
   assert.match(status(document).textContent, /0 位候选用户.*0\/0/);
-  assert.equal(
-    document.querySelector(".sdf-empty").textContent,
-    "此模式下暂无候选用户",
-  );
-  assert.equal(document.querySelector(".sdf-empty").hidden, false);
+  assert.equal(document.querySelector(".sdf-results").textContent, "");
   assert.match(
     document.querySelector("progress").getAttribute("aria-valuetext"),
     /已处理 0 \/ 0/,

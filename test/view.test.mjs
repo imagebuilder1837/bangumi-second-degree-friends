@@ -20,6 +20,21 @@ test("opening discovery shows friends of friends without fetching relationships"
   assert.deepEqual(requests, []);
 });
 
+test("cache loading and missing cache show status only in the header", async (t) => {
+  const { document } = component(t);
+  link(document, "二度好友发现").click();
+  assert.equal(
+    document.querySelector('[role="status"]').textContent,
+    "正在读取缓存",
+  );
+  const results = document.querySelector(".sdf-results");
+  assert.equal(results.textContent, "");
+  await waitFor(() =>
+    document.querySelector('[role="status"]').textContent.startsWith("缓存不足"),
+  );
+  assert.equal(results.textContent, "");
+});
+
 test("basic dialog can be closed and reopened without relationship requests", (t) => {
   const { document, requests } = component(t);
   link(document, "二度好友发现").click();
@@ -261,15 +276,27 @@ test("rankings load fifty at a time until every candidate is reachable without r
     document.querySelector('[role="status"]').textContent.startsWith("完成"),
   );
   assert.equal(document.querySelectorAll("ol > li").length, 50);
-  button(document, "显示更多").click();
+  const previousLast = document.querySelectorAll("ol > li")[49];
+  button(document, "显示更多候选用户").focus();
+  button(document, "显示更多候选用户").click();
   assert.equal(document.querySelectorAll("ol > li").length, 100);
-  button(document, "显示更多").click();
+  assert.equal(document.querySelectorAll("ol > li")[49], previousLast);
+  assert.equal(
+    document.activeElement.getAttribute("href"),
+    "/user/candidate-050",
+  );
+  button(document, "显示更多候选用户").focus();
+  button(document, "显示更多候选用户").click();
   assert.equal(document.querySelectorAll("ol > li").length, 103);
+  assert.equal(
+    document.activeElement.getAttribute("href"),
+    "/user/candidate-100",
+  );
   assert.equal(
     document.querySelector("ol > li:last-child a").getAttribute("href"),
     "/user/candidate-102",
   );
-  assert.equal(button(document, "显示更多"), undefined);
+  assert.equal(button(document, "显示更多候选用户"), undefined);
   assert.equal(document.querySelectorAll("[data-medal]").length, 3);
   assert.equal(requests.length, 2);
 });
@@ -296,10 +323,17 @@ test("contributor avatars load forty at a time and eventually expose every count
   const row = () => document.querySelector("ol > li");
   assert.equal(row().querySelector(".count").textContent, "83");
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
+  const firstAvatar = row().querySelector(".sdf-contributors a");
+  assert.equal(button(row(), "显示更多头像").textContent, "显示更多");
+  button(row(), "显示更多头像").focus();
   button(row(), "显示更多头像").click();
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 80);
+  assert.equal(row().querySelector(".sdf-contributors a"), firstAvatar);
+  assert.equal(document.activeElement.getAttribute("href"), "/user/middle-040");
+  button(row(), "显示更多头像").focus();
   button(row(), "显示更多头像").click();
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 83);
+  assert.equal(document.activeElement.getAttribute("href"), "/user/middle-080");
   assert.equal(
     row()
       .querySelector(".sdf-contributors a:last-of-type")
@@ -350,7 +384,7 @@ test("live reordering keeps expansion with the candidate and retains loaded rank
   await waitFor(
     () => document.querySelector("ol .count")?.textContent === "41",
   );
-  button(document, "显示更多").click();
+  button(document, "显示更多候选用户").click();
   let alpha = link(document, "alpha").closest("li");
   button(alpha, "展开").click();
   alpha = link(document, "alpha").closest("li");
@@ -413,7 +447,7 @@ test("new scans and mode changes reset collapsed candidates and both batch sizes
     button(row(), "展开").click();
     assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
     button(row(), "显示更多头像").click();
-    button(document, "显示更多").click();
+    button(document, "显示更多候选用户").click();
     assert.equal(document.querySelectorAll("ol > li").length, 100);
     assert.equal(row().querySelectorAll(".sdf-contributors a").length, 42);
     if (round === 1) {
@@ -421,7 +455,7 @@ test("new scans and mode changes reset collapsed candidates and both batch sizes
       mode.value = "rev_friends/rev_friends";
       mode.dispatchEvent(new window.Event("change"));
       assert.equal(document.querySelectorAll("ol > li").length, 0);
-      assert.equal(button(document, "显示更多"), undefined);
+      assert.equal(button(document, "显示更多候选用户"), undefined);
     }
   }
 });
@@ -552,7 +586,7 @@ test("cached rankings disclose exact contributors and mode changes reset both ca
   assert.equal(row().querySelector(".count").textContent, "42");
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
   button(row(), "显示更多头像").click();
-  button(document, "显示更多").click();
+  button(document, "显示更多候选用户").click();
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 42);
   assert.deepEqual(
     [...row().querySelectorAll(".sdf-contributors a")]

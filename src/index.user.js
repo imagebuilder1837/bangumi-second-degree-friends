@@ -382,7 +382,33 @@
     dialog.setAttribute("aria-modal", "true");
     dialog.hidden = true;
     dialog.innerHTML =
-      '<div class="sdf-panel"><header class="sdf-header"><div class="sdf-controls"><button type="button" class="sdf-start">开始寻找</button><select aria-label="发现模式"><option value="friends/friends">好友的好友</option><option value="friends/rev_friends">好友的反向好友</option><option value="rev_friends/friends">反向好友的好友</option><option value="rev_friends/rev_friends">反向好友的反向好友</option></select><button type="button" class="sdf-close" aria-label="关闭" title="关闭">×</button></div><div class="sdf-status"><p role="status">尚未开始</p><progress aria-label="扫描进度" hidden></progress></div></header><div class="sdf-results" tabindex="0" role="region" aria-label="候选用户列表"><ol></ol><p class="sdf-empty">点击“开始寻找”，发现二度好友</p></div></div>';
+      '<div class="sdf-panel"><header class="sdf-header"><div class="sdf-controls"><button type="button" class="sdf-start">开始寻找</button><select aria-label="发现模式"><option value="friends/friends">好友的好友</option><option value="friends/rev_friends">好友的反向好友</option><option value="rev_friends/friends">反向好友的好友</option><option value="rev_friends/rev_friends">反向好友的反向好友</option></select><button type="button" class="sdf-close" aria-label="关闭" title="关闭">×</button></div><div class="sdf-status"><p role="status">尚未开始</p><progress aria-label="扫描进度" hidden></progress></div></header><div class="sdf-results" tabindex="0" role="region" aria-label="候选用户列表"><ol></ol></div></div>';
+    let keyboardFocus = false;
+    const setKeyboardFocus = (value) => {
+      keyboardFocus = value;
+      dialog.classList.toggle("sdf-keyboard-focus", value);
+      entry.classList.toggle("sdf-keyboard-focus", value);
+    };
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !["Shift", "Control", "Alt", "Meta"].includes(event.key)
+        )
+          setKeyboardFocus(true);
+      },
+      true,
+    );
+    for (const type of ["pointerdown", "pointermove"])
+      document.addEventListener(
+        type,
+        () => {
+          if (keyboardFocus) setKeyboardFocus(false);
+        },
+        true,
+      );
     let scroll;
     const hide = () => {
       if (dialog.hidden) return;
@@ -421,7 +447,7 @@
     });
     const style = document.createElement("style");
     style.textContent = `
-    #second-degree-friends-dialog { --sdf-bg: #fff; --sdf-text: #333; --sdf-muted: #777; --sdf-border: #e4e4e4; --sdf-soft: #fafafa; --sdf-accent: #f09199; --sdf-accent-text: #8d3544; position: fixed; inset: 0; z-index: 10000; box-sizing: border-box; background: #0006; padding: 20px; color: var(--sdf-text); font: 13px/1.6 "SF Pro SC", "SF Pro Display", "PingFang SC", "Lucida Grande", "Helvetica Neue", Helvetica, Arial, sans-serif; }
+    #second-degree-friends-dialog { --sdf-bg: #fff; --sdf-text: #333; --sdf-muted: #777; --sdf-border: #e4e4e4; --sdf-soft: #fafafa; --sdf-hover: #00000008; --sdf-accent: #f09199; --sdf-accent-text: #8d3544; position: fixed; inset: 0; z-index: 10000; box-sizing: border-box; background: #0006; padding: 20px; color: var(--sdf-text); font: 13px/1.6 "SF Pro SC", "SF Pro Display", "PingFang SC", "Lucida Grande", "Helvetica Neue", Helvetica, Arial, sans-serif; }
     #second-degree-friends-dialog [hidden] { display: none !important; }
     #second-degree-friends-dialog:not([hidden]) { display: grid; place-items: center; }
     #second-degree-friends-dialog .sdf-panel { box-sizing: border-box; display: flex; flex-direction: column; width: min(780px, 100%); height: min(820px, 85dvh); min-height: 0; overflow: hidden; background: var(--sdf-bg); border: 1px solid var(--sdf-border); border-radius: 10px; box-shadow: 0 8px 40px #0003; }
@@ -432,7 +458,9 @@
     #second-degree-friends-dialog .sdf-start { flex-shrink: 0; border-color: var(--sdf-accent); background: var(--sdf-accent); color: #fff; font-weight: 600; }
     #second-degree-friends-dialog select { min-width: 0; max-width: calc(100% - 140px); cursor: pointer; }
     #second-degree-friends-dialog button:disabled, #second-degree-friends-dialog select:disabled { opacity: .55; cursor: default; }
-    #second-degree-friends-dialog :focus-visible { outline: 2px solid var(--sdf-accent); outline-offset: 2px; }
+    #second-degree-friends-entry a:focus, #second-degree-friends-dialog :focus { outline: none; }
+    #second-degree-friends-entry a.sdf-keyboard-focus:focus, #second-degree-friends-dialog.sdf-keyboard-focus :focus { outline: 2px solid var(--sdf-accent, #f09199); outline-offset: 2px; }
+    html[data-theme="dark"] #second-degree-friends-entry { --sdf-accent: #cf7885; }
     #second-degree-friends-dialog .sdf-close { flex-shrink: 0; margin-left: auto; width: 30px; height: 30px; padding: 0; border-color: transparent; background: transparent; color: var(--sdf-muted); font-size: 24px; font-weight: 300; }
     #second-degree-friends-dialog .sdf-status { display: flex; flex-direction: column; min-height: 0; margin-top: 16px; color: var(--sdf-muted); font-size: 12px; }
     #second-degree-friends-dialog .sdf-status > p, #second-degree-friends-dialog progress { flex: none; }
@@ -449,7 +477,7 @@
     #second-degree-friends-dialog summary::-webkit-details-marker { display: none; }
     #second-degree-friends-dialog summary::before { content: ""; width: 5px; height: 5px; border: solid currentColor; border-width: 0 1px 1px 0; transform: rotate(-45deg); transition: transform .15s ease; }
     #second-degree-friends-dialog details[open] > summary::before { transform: rotate(45deg); }
-    #second-degree-friends-dialog summary:hover { color: var(--sdf-text); background: var(--sdf-soft); }
+    #second-degree-friends-dialog summary:hover, #second-degree-friends-dialog .sdf-more:hover, #second-degree-friends-dialog .sdf-toggle:hover { color: var(--sdf-text); background: var(--sdf-hover); }
     #second-degree-friends-dialog details p { margin: 4px 0 0; overflow-wrap: anywhere; }
     #second-degree-friends-dialog .sdf-detail-body { box-sizing: border-box; max-height: min(140px, 22dvh); margin-top: 6px; padding: 8px 12px; overflow: auto; overscroll-behavior: contain; text-align: left; background: var(--sdf-soft); border: 1px solid var(--sdf-border); border-radius: 5px; }
     #second-degree-friends-dialog .sdf-detail-body > p { margin: 0 0 6px; }
@@ -457,7 +485,7 @@
     #second-degree-friends-dialog .sdf-skip-row + .sdf-skip-row { border-top: 1px dotted var(--sdf-border); }
     #second-degree-friends-dialog .sdf-skip-row a { min-width: 0; overflow-wrap: anywhere; }
     #second-degree-friends-dialog .sdf-skip-row span { font-size: 11px; }
-    #second-degree-friends-dialog .sdf-results { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px 16px 20px 22px; }
+    #second-degree-friends-dialog .sdf-results { min-height: 0; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; scrollbar-gutter: stable; padding: 16px 16px 28px 22px; }
     #second-degree-friends-dialog ol { list-style: none; margin: 0; padding: 0; }
     #second-degree-friends-dialog li { padding: 0; border-radius: 6px; margin: 0 0 8px; border: 1px solid var(--sdf-border); background: var(--sdf-bg); }
     #second-degree-friends-dialog .sdf-candidate { display: grid; grid-template-columns: minmax(32px, max-content) minmax(120px, 1fr) minmax(0, 1.5fr) auto; align-items: center; gap: 10px; padding: 12px; }
@@ -469,17 +497,20 @@
     #second-degree-friends-dialog .sdf-toggle { white-space: nowrap; padding: 4px 2px; border-color: transparent; border-radius: 4px; background: transparent; color: var(--sdf-muted); font-size: 12px; }
     #second-degree-friends-dialog .sdf-toggle::after { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 3px 3px 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
     #second-degree-friends-dialog .sdf-toggle[aria-expanded="true"]::after { margin-bottom: 0; transform: rotate(225deg); }
-    #second-degree-friends-dialog .sdf-contributors { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 12px 12px 54px; padding-top: 12px; border-top: 1px solid var(--sdf-border); }
+    #second-degree-friends-dialog .sdf-contributors { margin: 0 12px 12px 54px; padding-top: 12px; border-top: 1px solid var(--sdf-border); }
+    #second-degree-friends-dialog .sdf-avatars { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     #second-degree-friends-dialog .sdf-contributors a { display: inline-flex; }
-    #second-degree-friends-dialog .sdf-contributors button { font-size: 12px; }
-    #second-degree-friends-dialog .sdf-empty { margin: 48px 12px; text-align: center; color: var(--sdf-muted); }
+    #second-degree-friends-dialog .sdf-more { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--sdf-muted); font-size: 12px; }
+    #second-degree-friends-dialog .sdf-more::after { content: ""; width: 5px; height: 5px; margin-top: -3px; border: solid currentColor; border-width: 0 1px 1px 0; transform: rotate(45deg); }
+    #second-degree-friends-dialog .sdf-more-ranks { width: 100%; }
+    #second-degree-friends-dialog .sdf-more-contributors { display: flex; justify-content: flex-end; margin-top: 4px; }
     #second-degree-friends-dialog [data-medal="gold"] { background: #fff7df; border-color: #ecdbab; }
     #second-degree-friends-dialog [data-medal="silver"] { background: #f1f3f6; border-color: #d9dfe7; }
     #second-degree-friends-dialog [data-medal="bronze"] { background: #f9eee5; border-color: #e7d3c1; }
     #second-degree-friends-dialog [data-medal="gold"] .sdf-rank { color: #a17c28; }
     #second-degree-friends-dialog [data-medal="silver"] .sdf-rank { color: #738198; }
     #second-degree-friends-dialog [data-medal="bronze"] .sdf-rank { color: #a17551; }
-    html[data-theme="dark"] #second-degree-friends-dialog { --sdf-bg: #252525; --sdf-text: #d8d8d8; --sdf-muted: #aaa; --sdf-border: #444; --sdf-soft: #303030; --sdf-accent: #cf7885; --sdf-accent-text: #f0a5af; color-scheme: dark; }
+    html[data-theme="dark"] #second-degree-friends-dialog { --sdf-bg: #252525; --sdf-text: #d8d8d8; --sdf-muted: #aaa; --sdf-border: #444; --sdf-soft: #303030; --sdf-hover: #ffffff0d; --sdf-accent: #cf7885; --sdf-accent-text: #f0a5af; color-scheme: dark; }
     html[data-theme="dark"] #second-degree-friends-dialog [data-medal="gold"] { background: #3b3424; border-color: #655536; }
     html[data-theme="dark"] #second-degree-friends-dialog [data-medal="silver"] { background: #30343b; border-color: #4b5360; }
     html[data-theme="dark"] #second-degree-friends-dialog [data-medal="bronze"] { background: #3c3028; border-color: #68503d; }
@@ -491,7 +522,7 @@
       #second-degree-friends-dialog .sdf-panel { height: calc(100dvh - 16px); }
       #second-degree-friends-dialog .sdf-header { padding: 16px 14px 12px; }
       #second-degree-friends-dialog .sdf-controls { gap: 6px; }
-      #second-degree-friends-dialog .sdf-results { padding: 12px 8px 12px 14px; }
+      #second-degree-friends-dialog .sdf-results { padding: 12px 8px 28px 14px; }
       #second-degree-friends-dialog .sdf-candidate { grid-template-columns: minmax(28px, max-content) minmax(0, 1fr) auto; gap: 4px 8px; padding: 10px; }
       #second-degree-friends-dialog .sdf-rank { grid-column: 1; grid-row: 1 / 3; font-size: 22px; }
       #second-degree-friends-dialog .sdf-candidate > a { grid-column: 2; grid-row: 1; }
@@ -539,7 +570,7 @@
         content.append(item);
       }
     };
-    const empty = dialog.querySelector(".sdf-empty");
+    const resultsRegion = dialog.querySelector(".sdf-results");
     const homeName =
       document
         .querySelector("#headerProfile h1.nameSingle .inner > .name > a[href]")
@@ -568,6 +599,8 @@
     const moreRanks = document.createElement("button");
     moreRanks.type = "button";
     moreRanks.textContent = "显示更多";
+    moreRanks.className = "sdf-more sdf-more-ranks";
+    moreRanks.setAttribute("aria-label", "显示更多候选用户");
     moreRanks.dataset.focusKey = "more-ranks";
     const userLink = (user, showName = false) => {
       const link = document.createElement("a");
@@ -585,13 +618,17 @@
       if (showName) link.append(user.name);
       return link;
     };
-    const render = (results, complete = false) => {
-      const focusedKey = document.activeElement?.dataset.focusKey;
+    const render = (results, complete = false, { from = 0, focusKey } = {}) => {
+      const scrollTop = resultsRegion.scrollTop;
+      const focusedKey = focusKey ?? document.activeElement?.dataset.focusKey;
       const focusedUser = document.activeElement?.closest("li")?.dataset.userId;
-      dialog.querySelector("ol").replaceChildren();
-      empty.hidden = results.length > 0;
+      const list = dialog.querySelector("ol");
+      if (from === 0) list.replaceChildren();
       moreRanks.remove();
-      for (const [index, user] of results.slice(0, visibleRanks).entries()) {
+      for (const [offset, user] of results
+        .slice(from, visibleRanks)
+        .entries()) {
+        const index = from + offset;
         const row = document.createElement("li");
         row.dataset.userId = user.id;
         if (complete && index < 3)
@@ -631,32 +668,58 @@
         if (open) {
           const contributors = document.createElement("div");
           contributors.className = "sdf-contributors";
-          const visible = visibleContributors.get(user.id) ?? 40;
-          for (const contributor of user.contributors.slice(0, visible)) {
-            const link = userLink(contributor);
-            link.dataset.focusKey = `contributor:${user.id}:${contributor.id}`;
-            contributors.append(link);
-          }
+          const avatars = document.createElement("div");
+          avatars.className = "sdf-avatars";
+          contributors.append(avatars);
+          let visible = visibleContributors.get(user.id) ?? 40;
+          const appendAvatars = (from) => {
+            for (const contributor of user.contributors.slice(from, visible)) {
+              const link = userLink(contributor);
+              link.dataset.focusKey = `contributor:${user.id}:${contributor.id}`;
+              avatars.append(link);
+            }
+          };
+          appendAvatars(0);
           if (user.contributors.length > visible) {
+            const footer = document.createElement("div");
+            footer.className = "sdf-more-contributors";
             const more = document.createElement("button");
             more.type = "button";
-            more.textContent = "显示更多头像";
+            more.className = "sdf-more";
+            more.textContent = "显示更多";
+            more.setAttribute("aria-label", "显示更多头像");
             more.dataset.focusKey = `more-contributors:${user.id}`;
             more.addEventListener("click", () => {
-              visibleContributors.set(user.id, visible + 40);
-              render(results, complete);
+              const scrollTop = resultsRegion.scrollTop;
+              const focused = document.activeElement === more;
+              const from = visible;
+              visible += 40;
+              visibleContributors.set(user.id, visible);
+              appendAvatars(from);
+              if (focused)
+                avatars.children[from]?.focus({ preventScroll: true });
+              if (visible >= user.contributors.length) footer.remove();
+              resultsRegion.scrollTop = scrollTop;
             });
-            contributors.append(more);
+            footer.append(more);
+            contributors.append(footer);
           }
           row.append(contributors);
         }
-        dialog.querySelector("ol").append(row);
+        list.append(row);
       }
       if (results.length > visibleRanks) {
-        dialog.querySelector("ol").after(moreRanks);
+        list.after(moreRanks);
         moreRanks.onclick = () => {
+          const from = visibleRanks;
           visibleRanks += 50;
-          render(results, complete);
+          render(results, complete, {
+            from,
+            focusKey:
+              document.activeElement === moreRanks
+                ? `candidate:${results[from].id}`
+                : undefined,
+          });
         };
       }
       if (!dialog.hidden && focusedKey) {
@@ -670,8 +733,10 @@
           target ??
           row?.querySelector("button") ??
           dialog.querySelector("ol > li:last-child a")
-        )?.focus();
+        )?.focus({ preventScroll: true });
       }
+      // A full live-result rebuild can reset the scroller even with preventScroll.
+      resultsRegion.scrollTop = scrollTop;
     };
     const resetResults = () => {
       showSkipped();
@@ -692,14 +757,12 @@
       viewed = true;
       resetResults();
       progressBar.hidden = true;
-      empty.textContent = "正在读取缓存…";
       setStatus("正在读取缓存");
       let outcome;
       try {
         outcome = await cached(mode.value);
       } catch (error) {
         if (request === cacheRequest) {
-          empty.textContent = `缓存读取失败：${error.message}`;
           if (window.Date.now() >= cooldownUntil)
             setStatus(`缓存读取失败：${error.message}；可主动开始寻找`, true);
         }
@@ -708,9 +771,6 @@
       if (request !== cacheRequest) return;
       render(outcome?.results ?? [], Boolean(outcome));
       showSkipped(outcome?.skipped);
-      empty.textContent = outcome
-        ? "此模式下暂无候选用户"
-        : "点击“开始寻找”，发现二度好友";
       if (window.Date.now() < cooldownUntil) return;
       setStatus(
         outcome
@@ -744,7 +804,6 @@
       if (!dialog.hidden) start.focus();
       setStatus("正在获取主页关系");
       setProgress();
-      empty.textContent = "正在寻找候选用户…";
       resetResults();
       try {
         const outcome = await scan(current.mode, {
@@ -780,9 +839,6 @@
         render(outcome.results, outcome.complete);
         showSkipped(outcome.skipped);
         setProgress(outcome.counts);
-        empty.textContent = outcome.complete
-          ? "此模式下暂无候选用户"
-          : "未发现候选用户，部分关系读取失败";
         setStatus(
           `${outcome.complete ? "完成" : "读取失败，未完成"}${skipSummary(outcome.skipped)}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
           !outcome.complete || Boolean(outcome.saveWarning),
@@ -794,7 +850,6 @@
             ? "已停止，结果未完成"
             : `读取失败，未完成：${error.message}`;
         if (current.progress) message += `；${current.progress}`;
-        empty.textContent = "结果未完成，可手动重新开始";
         // Unknown totals must not keep looking like an active scan after stopping.
         if (!progressBar.hasAttribute("value")) progressBar.hidden = true;
         setStatus(message, true);
