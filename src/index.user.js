@@ -289,21 +289,20 @@
   }
 
   function addContributions(candidates, members, intermediary, excluded) {
-    const next = new Map(candidates);
     for (const user of members) {
       if (excluded.has(user.id)) continue;
-      const previous = next.get(user.id) ?? {
+      const previous = candidates.get(user.id) ?? {
         ...user,
         count: 0,
         contributors: [],
       };
-      next.set(user.id, {
+      candidates.set(user.id, {
         ...previous,
         count: previous.count + 1,
         contributors: [...previous.contributors, intermediary],
       });
     }
-    return next;
+    return candidates;
   }
 
   function rankCandidates(candidates) {
@@ -870,13 +869,24 @@
       // A full live-result rebuild can reset the scroller even with preventScroll.
       resultsRegion.scrollTop = scrollTop;
     };
+    let pendingPresentation;
+    const paintResults = () => {
+      if (dialog.hidden || !pendingPresentation) return;
+      const { results, complete, skipped, failures } = pendingPresentation;
+      pendingPresentation = undefined;
+      render(results, complete);
+      showDetails(skipped, failures);
+    };
+    const presentResults = (results, complete = false, skipped, failures) => {
+      pendingPresentation = { results, complete, skipped, failures };
+      paintResults();
+    };
     const resetResults = () => {
-      showDetails();
       details.open = false;
       expanded.clear();
       visibleContributors.clear();
       visibleRanks = 50;
-      render([]);
+      presentResults([]);
     };
     const mode = dialog.querySelector("select");
     let task;
@@ -901,8 +911,11 @@
         return;
       }
       if (request !== cacheRequest) return;
-      render(outcome?.results ?? [], Boolean(outcome));
-      showDetails(outcome?.skipped);
+      presentResults(
+        outcome?.results ?? [],
+        Boolean(outcome),
+        outcome?.skipped,
+      );
       if (window.Date.now() < cooldownUntil) return;
       setStatus(
         outcome
@@ -962,14 +975,17 @@
           update: (results, progress, counts, skipped, failures) => {
             if (task !== current || current.controller.signal.aborted) return;
             current.progress = progress;
-            render(results);
-            showDetails(skipped, failures);
+            presentResults(results, false, skipped, failures);
             setProgress(counts);
             if (counts) setStatus(`扫描进度：${progress}`, counts.failed > 0);
           },
         });
-        render(outcome.results, outcome.complete);
-        showDetails(outcome.skipped, outcome.failures);
+        presentResults(
+          outcome.results,
+          outcome.complete,
+          outcome.skipped,
+          outcome.failures,
+        );
         setProgress(outcome.counts);
         setStatus(
           `${outcome.complete ? "完成" : "读取失败，未完成"}${skipSummary(outcome.skipped)}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
@@ -1003,6 +1019,7 @@
       document.body.style.overflow = "hidden";
       document.documentElement.style.overflow = "hidden";
       dialog.hidden = false;
+      paintResults();
       focusable()[0]?.focus();
     });
   }
@@ -1167,7 +1184,16 @@
           return;
         const snapshots = [initial, excluded];
         const excludedIds = new Set([home.id, ...excluded.members]);
-        const user = (id) => ({ id, name: id, avatar: "", ...data.users[id] });
+        const users = new Map();
+        const user = (id) => {
+          if (!users.has(id))
+            users.set(id, { id, name: id, avatar: "", ...data.users[id] });
+          return users.get(id);
+        };
+        function* members(snapshot) {
+          for (const id of snapshot.members)
+            if (!excludedIds.has(id)) yield user(id);
+        }
         let candidates = new Map();
         const skipped = [];
         for (const direction of new Set([first, second])) {
@@ -1199,7 +1225,7 @@
             );
           candidates = addContributions(
             candidates,
-            snapshot.members.map(user),
+            members(snapshot),
             user(id),
             excludedIds,
           );

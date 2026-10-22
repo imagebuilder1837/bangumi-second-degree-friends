@@ -68,7 +68,14 @@ test("hidden scans keep progress and completion only in the dialog, and reopen t
   button(document, "关闭").click();
   const dialog = document.querySelector('[role="dialog"]');
   pending.get("bob")(response(relationship("bob", ["zed"])));
-  await waitFor(() => document.querySelector("ol .count"));
+  await waitFor(() =>
+    /1\/2/.test(dialog.querySelector('[role="status"]').textContent),
+  );
+  assert.equal(
+    document.querySelector("ol .count"),
+    null,
+    "hidden updates defer result painting",
+  );
   assert.ok(dialog.hidden);
   assert.equal(
     entry.closest("li").textContent,

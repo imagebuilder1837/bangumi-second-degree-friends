@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { clock } from "./support/clock.mjs";
+import { scanRelationships } from "../src/scan.mjs";
+import { readHome } from "../src/site.mjs";
 import {
   component,
   link,
@@ -9,6 +11,59 @@ import {
   relationship,
   response,
 } from "./support/component.mjs";
+
+test("later relationship reads never change previously published candidate results", async (t) => {
+  let release;
+  const waiting = new Promise((resolve) => {
+    release = resolve;
+  });
+  const graph = {
+    alice: ["bob", "carol"],
+    bob: ["zed"],
+    carol: ["zed", "alpha"],
+  };
+  const { window, document } = component(t, {
+    async respond(url) {
+      const owner = new URL(url).pathname.split("/")[2];
+      if (owner === "carol") await waiting;
+      return response(relationship(owner, graph[owner]));
+    },
+  });
+  let published;
+  const run = scanRelationships(
+    window,
+    readHome(document, window.location.href),
+    "friends/friends",
+    {
+      signal: new window.AbortController().signal,
+      rateLimited: () => assert.fail("must not rate limit"),
+      update(results) {
+        if (!published && results.length) published = results;
+      },
+    },
+  );
+  await waitFor(() => published);
+  assert.equal(published[0].count, 1);
+  assert.deepEqual(
+    published[0].contributors.map((user) => user.id),
+    ["bob"],
+  );
+  release();
+  const outcome = await run;
+  assert.deepEqual(
+    outcome.results.map((user) => [user.id, user.count]),
+    [
+      ["zed", 2],
+      ["alpha", 1],
+    ],
+  );
+  assert.equal(published.length, 1);
+  assert.equal(published[0].count, 1);
+  assert.deepEqual(
+    published[0].contributors.map((user) => user.id),
+    ["bob"],
+  );
+});
 
 test("start reads the provided current username relationship link, not visitor or numeric UID", async (t) => {
   const { document, requests } = component(t, {

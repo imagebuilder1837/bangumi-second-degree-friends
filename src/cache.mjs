@@ -160,7 +160,16 @@ export function relationshipCache(window, home) {
       if (!initial || !excluded || initial.skipped || excluded.skipped) return;
       const snapshots = [initial, excluded];
       const excludedIds = new Set([home.id, ...excluded.members]);
-      const user = (id) => ({ id, name: id, avatar: "", ...data.users[id] });
+      const users = new Map();
+      const user = (id) => {
+        if (!users.has(id))
+          users.set(id, { id, name: id, avatar: "", ...data.users[id] });
+        return users.get(id);
+      };
+      function* members(snapshot) {
+        for (const id of snapshot.members)
+          if (!excludedIds.has(id)) yield user(id);
+      }
       let candidates = new Map();
       const skipped = [];
       for (const direction of new Set([first, second])) {
@@ -188,7 +197,7 @@ export function relationshipCache(window, home) {
           );
         candidates = addContributions(
           candidates,
-          snapshot.members.map(user),
+          members(snapshot),
           user(id),
           excludedIds,
         );

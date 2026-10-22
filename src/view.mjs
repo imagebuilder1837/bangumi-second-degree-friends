@@ -410,13 +410,24 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     // A full live-result rebuild can reset the scroller even with preventScroll.
     resultsRegion.scrollTop = scrollTop;
   };
+  let pendingPresentation;
+  const paintResults = () => {
+    if (dialog.hidden || !pendingPresentation) return;
+    const { results, complete, skipped, failures } = pendingPresentation;
+    pendingPresentation = undefined;
+    render(results, complete);
+    showDetails(skipped, failures);
+  };
+  const presentResults = (results, complete = false, skipped, failures) => {
+    pendingPresentation = { results, complete, skipped, failures };
+    paintResults();
+  };
   const resetResults = () => {
-    showDetails();
     details.open = false;
     expanded.clear();
     visibleContributors.clear();
     visibleRanks = 50;
-    render([]);
+    presentResults([]);
   };
   const mode = dialog.querySelector("select");
   let task;
@@ -441,8 +452,7 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
       return;
     }
     if (request !== cacheRequest) return;
-    render(outcome?.results ?? [], Boolean(outcome));
-    showDetails(outcome?.skipped);
+    presentResults(outcome?.results ?? [], Boolean(outcome), outcome?.skipped);
     if (window.Date.now() < cooldownUntil) return;
     setStatus(
       outcome
@@ -502,14 +512,17 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
         update: (results, progress, counts, skipped, failures) => {
           if (task !== current || current.controller.signal.aborted) return;
           current.progress = progress;
-          render(results);
-          showDetails(skipped, failures);
+          presentResults(results, false, skipped, failures);
           setProgress(counts);
           if (counts) setStatus(`扫描进度：${progress}`, counts.failed > 0);
         },
       });
-      render(outcome.results, outcome.complete);
-      showDetails(outcome.skipped, outcome.failures);
+      presentResults(
+        outcome.results,
+        outcome.complete,
+        outcome.skipped,
+        outcome.failures,
+      );
       setProgress(outcome.counts);
       setStatus(
         `${outcome.complete ? "完成" : "读取失败，未完成"}${skipSummary(outcome.skipped)}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
@@ -543,6 +556,7 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     document.body.style.overflow = "hidden";
     document.documentElement.style.overflow = "hidden";
     dialog.hidden = false;
+    paintResults();
     focusable()[0]?.focus();
   });
 }

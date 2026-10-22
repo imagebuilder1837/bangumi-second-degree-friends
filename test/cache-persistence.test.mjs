@@ -33,6 +33,58 @@ function staged(members, fetchedAt = 1) {
   };
 }
 
+test("overlapping cached relationships rebuild independent complete rankings and counted intermediates", async () => {
+  const cache = relationshipCache(environment(), home);
+  await cache.commit(
+    {
+      relationships: {
+        alice: { friends: { members: ["bob", "carol", "dana"], fetchedAt: 1 } },
+        bob: {
+          friends: {
+            members: ["alice", "carol", "zed", "alpha"],
+            fetchedAt: 2,
+          },
+        },
+        carol: {
+          friends: {
+            members: ["zed", "beta"],
+            fetchedAt: 3,
+            missingIdentifiers: 1,
+          },
+        },
+        dana: { friends: { skipped: true, fetchedAt: 4 } },
+      },
+      users: { zed: { name: "Zed", avatar: "", fetchedAt: 2 } },
+    },
+    signal(),
+  );
+  const first = await cache.lookup("friends/friends");
+  assert.equal(first.complete, true);
+  assert.deepEqual(
+    first.results.map((user) => [
+      user.id,
+      user.count,
+      user.contributors.map((middle) => middle.id),
+    ]),
+    [
+      ["zed", 2, ["bob", "carol"]],
+      ["alpha", 1, ["bob"]],
+      ["beta", 1, ["carol"]],
+    ],
+  );
+  assert.equal(first.results[0].name, "Zed");
+  assert.deepEqual(
+    first.skipped.map((item) => item.id),
+    ["carol", "dana"],
+  );
+  assert.equal(first.skipped[0].missingIdentifiers, 1);
+  first.results[0].count = 99;
+  first.results[0].contributors[0].name = "changed";
+  const second = await cache.lookup("friends/friends");
+  assert.equal(second.results[0].count, 2);
+  assert.equal(second.results[0].contributors[0].name, "bob");
+});
+
 test("a relationship snapshot larger than localStorage survives a fresh cache instance without truncation", async () => {
   const window = environment();
   const members = Array.from({ length: 66534 }, (_, i) => `user${i}`);
