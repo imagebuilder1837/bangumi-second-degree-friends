@@ -54,8 +54,11 @@ export function readRelationships(window, html, owner, base) {
   const members = new Map();
   for (const item of list.children) {
     if (!item.matches("li.user")) throw new Error("无效的好友条目");
-    const anchor = item.querySelector(
-      ".userContainer > strong > a.avatar[href]",
+    // Query links locally to avoid the costly compound selector on large lists.
+    const anchor = [...item.querySelectorAll("a.avatar[href]")].find(
+      (link) =>
+        link.parentElement.matches("strong") &&
+        link.parentElement.parentElement?.matches(".userContainer"),
     );
     if (!anchor) throw new Error("无效的好友条目");
     const url = new URL(anchor.getAttribute("href"), base);
