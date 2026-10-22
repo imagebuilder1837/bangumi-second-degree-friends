@@ -60,8 +60,19 @@
     return { id, friendsUrl: friendsUrl.href, reverseUrl: reverseUrl?.href };
   }
 
+  class UnavailableRelationshipError extends Error {}
+
   function readRelationships(window, html, owner, base) {
     const document = new window.DOMParser().parseFromString(html, "text/html");
+    const notice = document.querySelector("#colunmNotice");
+    if (
+      !document.querySelector("#headerProfile, #memberUserList") &&
+      notice?.querySelector("h2")?.textContent.trim() === "呜咕，出错了" &&
+      notice.querySelector("p.text")?.textContent.trim() ===
+        "啊噢，你访问的页面似乎被 Bangumi 娘吃掉了。" &&
+      notice.querySelector('img[src="/img/bangumi/404.png"]')
+    )
+      throw new UnavailableRelationshipError("原站关系列表不可访问");
     if (identity(document, base) !== owner)
       throw new Error("关系页面身份不匹配");
     const list = document.querySelector("#memberUserList.usersMedium");
@@ -306,18 +317,20 @@
     let next = 0;
     let succeeded = 0;
     let failed = 0;
+    const skipped = [];
     const publish = () => {
       signal.throwIfAborted();
       const results = rankCandidates(candidates);
       const counts = {
-        processed: succeeded + failed,
+        processed: succeeded + failed + skipped.length,
         total: intermediates.length,
         succeeded,
         failed,
+        skipped: skipped.length,
       };
-      const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}`;
-      update(results, progress, counts);
-      return { results, progress, counts, complete: failed === 0 };
+      const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}${skipped.length ? `，跳过 ${skipped.length}` : ""}`;
+      update(results, progress, counts, skipped);
+      return { results, progress, counts, skipped, complete: failed === 0 };
     };
     publish();
     const worker = async () => {
@@ -337,9 +350,19 @@
             excludedIds,
           );
           succeeded++;
-        } catch {
+        } catch (error) {
           signal.throwIfAborted();
-          failed++;
+          if (
+            intermediary.name === "[已注销]" &&
+            error instanceof UnavailableRelationshipError
+          ) {
+            skipped.push({ id: intermediary.id, direction: second });
+            staged.relationships[intermediary.id] ??= Object.create(null);
+            staged.relationships[intermediary.id][second] = {
+              skipped: true,
+              fetchedAt: window.Date.now(),
+            };
+          } else failed++;
         }
         publish();
       }
@@ -476,6 +499,32 @@
     const status = dialog.querySelector('[role="status"]');
     const progressBar = dialog.querySelector("progress");
     const cacheDetails = dialog.querySelector("details");
+    const skipDetails = document.createElement("details");
+    skipDetails.hidden = true;
+    skipDetails.innerHTML = "<summary>跳过详情</summary><div></div>";
+    // Keep a potentially long details list in the scrollable results region.
+    dialog.querySelector(".sdf-results").prepend(skipDetails);
+    const skipSummary = (skipped = []) =>
+      skipped.length ? `，跳过 ${skipped.length} 位 [已注销] 用户` : "";
+    const showSkipped = (skipped = []) => {
+      skipDetails.hidden = skipped.length === 0;
+      const content = skipDetails.querySelector("div");
+      content.replaceChildren();
+      for (const { id, direction } of skipped) {
+        const item = document.createElement("p");
+        const link = document.createElement("a");
+        link.href = `/user/${encodeURIComponent(id)}`;
+        link.className = "l";
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = id;
+        item.append(
+          link,
+          ` · ${direction === "friends" ? "好友" : "反向好友"} · 原站错误页`,
+        );
+        content.append(item);
+      }
+    };
     const empty = dialog.querySelector(".sdf-empty");
     const homeName =
       document
@@ -496,7 +545,7 @@
       progressBar.value = counts.total ? counts.processed : 1;
       progressBar.setAttribute(
         "aria-valuetext",
-        `已处理 ${counts.processed} / ${counts.total} 位中间用户，成功 ${counts.succeeded}，失败 ${counts.failed}`,
+        `已处理 ${counts.processed} / ${counts.total} 位中间用户，成功 ${counts.succeeded}，失败 ${counts.failed}${counts.skipped ? `，跳过 ${counts.skipped}` : ""}`,
       );
     };
     const expanded = new Set();
@@ -611,6 +660,8 @@
       }
     };
     const resetResults = () => {
+      showSkipped();
+      skipDetails.open = false;
       expanded.clear();
       visibleContributors.clear();
       visibleRanks = 50;
@@ -644,6 +695,7 @@
       }
       if (request !== cacheRequest) return;
       render(outcome?.results ?? [], Boolean(outcome));
+      showSkipped(outcome?.skipped);
       empty.textContent = outcome
         ? "此模式下暂无候选用户"
         : "点击“开始寻找”，发现二度好友";
@@ -657,7 +709,7 @@
       if (window.Date.now() < cooldownUntil) return;
       setStatus(
         outcome
-          ? `已载入缓存 · ${outcome.results.length} 位候选用户`
+          ? `已载入缓存 · ${outcome.results.length} 位候选用户${skipSummary(outcome.skipped)}`
           : "缓存不足，请主动开始寻找",
       );
     };
@@ -713,21 +765,23 @@
               Math.min(Math.max(0, until - window.Date.now()), 2147483647),
             );
           },
-          update: (results, progress, counts) => {
+          update: (results, progress, counts, skipped) => {
             if (task !== current || current.controller.signal.aborted) return;
             current.progress = progress;
             render(results);
+            showSkipped(skipped);
             setProgress(counts);
             setStatus(`扫描进度：${progress}`, counts.failed > 0);
           },
         });
         render(outcome.results, outcome.complete);
+        showSkipped(outcome.skipped);
         setProgress(outcome.counts);
         empty.textContent = outcome.complete
           ? "此模式下暂无候选用户"
           : "未发现候选用户，部分关系读取失败";
         setStatus(
-          `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
+          `${outcome.complete ? "完成" : "读取失败，未完成"}${skipSummary(outcome.skipped)}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
           !outcome.complete || Boolean(outcome.saveWarning),
         );
       } catch (error) {
@@ -794,13 +848,17 @@
         if (
           !record(snapshot) ||
           !timestamp(snapshot.fetchedAt) ||
-          !Array.isArray(snapshot.members) ||
-          !snapshot.members.every(identifier)
+          !(snapshot.skipped === true
+            ? snapshot.members === undefined
+            : Array.isArray(snapshot.members) &&
+              snapshot.members.every(identifier))
         )
           continue;
         data.relationships[id] ??= dictionary();
         data.relationships[id][direction] = {
-          members: [...new Set(snapshot.members)],
+          ...(snapshot.skipped === true
+            ? { skipped: true }
+            : { members: [...new Set(snapshot.members)] }),
           fetchedAt: snapshot.fetchedAt,
         };
       }
@@ -908,15 +966,21 @@
         const [first, second] = mode.split("/");
         const initial = data.relationships[home.id]?.[first];
         const excluded = data.relationships[home.id]?.[second];
-        if (!initial || !excluded) return;
+        if (!initial || !excluded || initial.skipped || excluded.skipped)
+          return;
         const snapshots = [initial, excluded];
         const excludedIds = new Set([home.id, ...excluded.members]);
         const user = (id) => ({ id, name: id, avatar: "", ...data.users[id] });
         let candidates = new Map();
+        const skipped = [];
         for (const id of initial.members) {
           const snapshot = data.relationships[id]?.[second];
           if (!snapshot) return;
           snapshots.push(snapshot);
+          if (snapshot.skipped) {
+            skipped.push({ id, direction: second });
+            continue;
+          }
           candidates = addContributions(
             candidates,
             snapshot.members.map(user),
@@ -927,6 +991,7 @@
         return {
           results: rankCandidates(candidates),
           complete: true,
+          skipped,
           earliest: Math.min(
             ...snapshots.map((snapshot) => snapshot.fetchedAt),
           ),

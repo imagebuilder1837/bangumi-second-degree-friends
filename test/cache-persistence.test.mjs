@@ -221,3 +221,49 @@ test("missing dependencies are unknown while explicit empty sets and property-li
     );
   }
 });
+
+test("skip observations persist independently by direction and replace rather than reuse older relationships", async () => {
+  const window = environment();
+  const cache = relationshipCache(window, home);
+  await cache.commit(staged(["old"]), signal());
+  await cache.commit(
+    {
+      relationships: {
+        alice: { rev_friends: { members: [], fetchedAt: 2 } },
+        bob: {
+          friends: { skipped: true, fetchedAt: 2 },
+          rev_friends: { members: ["reverse"], fetchedAt: 2 },
+        },
+      },
+      users: {},
+    },
+    signal(),
+  );
+  const fresh = relationshipCache(window, home);
+  const skipped = await fresh.lookup("friends/friends");
+  assert.deepEqual(skipped.results, []);
+  assert.deepEqual(skipped.skipped, [{ id: "bob", direction: "friends" }]);
+  assert.equal(skipped.latest, 2);
+  const reverse = await fresh.lookup("friends/rev_friends");
+  assert.deepEqual(
+    reverse.results.map((u) => u.id),
+    ["reverse"],
+  );
+  assert.deepEqual(reverse.skipped, []);
+  await fresh.commit(staged(["stale"], 1), signal());
+  assert.deepEqual((await fresh.lookup("friends/friends")).skipped, [
+    { id: "bob", direction: "friends" },
+  ]);
+  await fresh.commit(staged(["restored"], 3), signal());
+  const restored = await fresh.lookup("friends/friends");
+  assert.deepEqual(
+    restored.results.map((u) => u.id),
+    ["restored"],
+  );
+  assert.deepEqual(restored.skipped, []);
+  // A skipped observation is insufficient for the home or exclusion relationship.
+  assert.equal(
+    await relationshipCache(window, { id: "bob" }).lookup("friends/friends"),
+    undefined,
+  );
+});

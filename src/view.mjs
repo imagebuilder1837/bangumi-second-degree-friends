@@ -124,6 +124,32 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
   const status = dialog.querySelector('[role="status"]');
   const progressBar = dialog.querySelector("progress");
   const cacheDetails = dialog.querySelector("details");
+  const skipDetails = document.createElement("details");
+  skipDetails.hidden = true;
+  skipDetails.innerHTML = "<summary>跳过详情</summary><div></div>";
+  // Keep a potentially long details list in the scrollable results region.
+  dialog.querySelector(".sdf-results").prepend(skipDetails);
+  const skipSummary = (skipped = []) =>
+    skipped.length ? `，跳过 ${skipped.length} 位 [已注销] 用户` : "";
+  const showSkipped = (skipped = []) => {
+    skipDetails.hidden = skipped.length === 0;
+    const content = skipDetails.querySelector("div");
+    content.replaceChildren();
+    for (const { id, direction } of skipped) {
+      const item = document.createElement("p");
+      const link = document.createElement("a");
+      link.href = `/user/${encodeURIComponent(id)}`;
+      link.className = "l";
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = id;
+      item.append(
+        link,
+        ` · ${direction === "friends" ? "好友" : "反向好友"} · 原站错误页`,
+      );
+      content.append(item);
+    }
+  };
   const empty = dialog.querySelector(".sdf-empty");
   const homeName =
     document
@@ -144,7 +170,7 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     progressBar.value = counts.total ? counts.processed : 1;
     progressBar.setAttribute(
       "aria-valuetext",
-      `已处理 ${counts.processed} / ${counts.total} 位中间用户，成功 ${counts.succeeded}，失败 ${counts.failed}`,
+      `已处理 ${counts.processed} / ${counts.total} 位中间用户，成功 ${counts.succeeded}，失败 ${counts.failed}${counts.skipped ? `，跳过 ${counts.skipped}` : ""}`,
     );
   };
   const expanded = new Set();
@@ -259,6 +285,8 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     }
   };
   const resetResults = () => {
+    showSkipped();
+    skipDetails.open = false;
     expanded.clear();
     visibleContributors.clear();
     visibleRanks = 50;
@@ -292,6 +320,7 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     }
     if (request !== cacheRequest) return;
     render(outcome?.results ?? [], Boolean(outcome));
+    showSkipped(outcome?.skipped);
     empty.textContent = outcome
       ? "此模式下暂无候选用户"
       : "点击“开始寻找”，发现二度好友";
@@ -305,7 +334,7 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     if (window.Date.now() < cooldownUntil) return;
     setStatus(
       outcome
-        ? `已载入缓存 · ${outcome.results.length} 位候选用户`
+        ? `已载入缓存 · ${outcome.results.length} 位候选用户${skipSummary(outcome.skipped)}`
         : "缓存不足，请主动开始寻找",
     );
   };
@@ -361,21 +390,23 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
             Math.min(Math.max(0, until - window.Date.now()), 2147483647),
           );
         },
-        update: (results, progress, counts) => {
+        update: (results, progress, counts, skipped) => {
           if (task !== current || current.controller.signal.aborted) return;
           current.progress = progress;
           render(results);
+          showSkipped(skipped);
           setProgress(counts);
           setStatus(`扫描进度：${progress}`, counts.failed > 0);
         },
       });
       render(outcome.results, outcome.complete);
+      showSkipped(outcome.skipped);
       setProgress(outcome.counts);
       empty.textContent = outcome.complete
         ? "此模式下暂无候选用户"
         : "未发现候选用户，部分关系读取失败";
       setStatus(
-        `${outcome.complete ? "完成" : "读取失败，未完成"}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
+        `${outcome.complete ? "完成" : "读取失败，未完成"}${skipSummary(outcome.skipped)}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
         !outcome.complete || Boolean(outcome.saveWarning),
       );
     } catch (error) {

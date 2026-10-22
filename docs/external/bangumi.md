@@ -132,7 +132,9 @@
 ```
 
 - **不存在用户样本**：[`/user/__external_research_nonexistent__/friends`](https://bgm.tv/user/__external_research_nonexistent__/friends)返回原站完整外壳，主体为 `#colunmNotice`（原站拼写如此），含 `h2`“呜咕，出错了”、`p.text`“数据库中没有查询到该用户的信息”和 `/img/bangumi/404.png`；不是 `#memberUserList`。**HTTP 状态未知**，图片叫 404 不等于响应状态 404。
-- **未验证**：真实空 rev_friends 列表、登录后差异、封禁／注销／权限拒绝页面、会话过期、HTTP 401/403/404/5xx 与正文的对应关系。空 friends 样本不等于已核验空 rev_friends 模板。
+- **浏览器登录态补充实测**：`shironegi` 的好友中，`616197`、`1041797`、`1208024`、`1097234`、`1189298`、`1260050` 的主页身份匹配、显示名为 `[已注销]`，但 friends 返回 HTTP 200、最终 URL 不变，正文仅含 `#colunmNotice` 错误主体：`h2` 为“呜咕，出错了”、`p.text` 为“啊噢，你访问的页面似乎被 Bangumi 娘吃掉了。”、图片为 `/img/bangumi/404.png`，无身份头和列表；不使用缓存重新请求仍如此。`616197/rev_friends` 同样返回该错误页。错误页不能证明零关系或具体账号状态。
+- **反例**：同样显示名为 `[已注销]` 的 `yuri_chan` 的 friends 返回合法空列表，rev_friends 返回 167 条关系；`aguamalas`、`763761`、`e911` 的 friends 也可正常解析。不能仅凭显示名推断列表不可访问。
+- **未验证**：账号真实注销／封禁状态、权限拒绝页面、会话过期、HTTP 401/403/404/5xx 与正文的对应关系。空 friends 样本不等于已核验空 rev_friends 模板。
 
 ## 6. 三域名、凭据与资源地址
 

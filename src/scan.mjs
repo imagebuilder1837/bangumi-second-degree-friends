@@ -1,4 +1,4 @@
-import { readRelationships } from "./site.mjs";
+import { readRelationships, UnavailableRelationshipError } from "./site.mjs";
 import { requestText } from "./requests.mjs";
 import { addContributions, rankCandidates } from "./candidates.mjs";
 
@@ -45,18 +45,20 @@ export async function scanRelationships(
   let next = 0;
   let succeeded = 0;
   let failed = 0;
+  const skipped = [];
   const publish = () => {
     signal.throwIfAborted();
     const results = rankCandidates(candidates);
     const counts = {
-      processed: succeeded + failed,
+      processed: succeeded + failed + skipped.length,
       total: intermediates.length,
       succeeded,
       failed,
+      skipped: skipped.length,
     };
-    const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}`;
-    update(results, progress, counts);
-    return { results, progress, counts, complete: failed === 0 };
+    const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}${skipped.length ? `，跳过 ${skipped.length}` : ""}`;
+    update(results, progress, counts, skipped);
+    return { results, progress, counts, skipped, complete: failed === 0 };
   };
   publish();
   const worker = async () => {
@@ -76,9 +78,19 @@ export async function scanRelationships(
           excludedIds,
         );
         succeeded++;
-      } catch {
+      } catch (error) {
         signal.throwIfAborted();
-        failed++;
+        if (
+          intermediary.name === "[已注销]" &&
+          error instanceof UnavailableRelationshipError
+        ) {
+          skipped.push({ id: intermediary.id, direction: second });
+          staged.relationships[intermediary.id] ??= Object.create(null);
+          staged.relationships[intermediary.id][second] = {
+            skipped: true,
+            fetchedAt: window.Date.now(),
+          };
+        } else failed++;
       }
       publish();
     }

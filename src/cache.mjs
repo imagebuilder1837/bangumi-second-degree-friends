@@ -31,13 +31,17 @@ function validated(value) {
       if (
         !record(snapshot) ||
         !timestamp(snapshot.fetchedAt) ||
-        !Array.isArray(snapshot.members) ||
-        !snapshot.members.every(identifier)
+        !(snapshot.skipped === true
+          ? snapshot.members === undefined
+          : Array.isArray(snapshot.members) &&
+            snapshot.members.every(identifier))
       )
         continue;
       data.relationships[id] ??= dictionary();
       data.relationships[id][direction] = {
-        members: [...new Set(snapshot.members)],
+        ...(snapshot.skipped === true
+          ? { skipped: true }
+          : { members: [...new Set(snapshot.members)] }),
         fetchedAt: snapshot.fetchedAt,
       };
     }
@@ -145,15 +149,20 @@ export function relationshipCache(window, home) {
       const [first, second] = mode.split("/");
       const initial = data.relationships[home.id]?.[first];
       const excluded = data.relationships[home.id]?.[second];
-      if (!initial || !excluded) return;
+      if (!initial || !excluded || initial.skipped || excluded.skipped) return;
       const snapshots = [initial, excluded];
       const excludedIds = new Set([home.id, ...excluded.members]);
       const user = (id) => ({ id, name: id, avatar: "", ...data.users[id] });
       let candidates = new Map();
+      const skipped = [];
       for (const id of initial.members) {
         const snapshot = data.relationships[id]?.[second];
         if (!snapshot) return;
         snapshots.push(snapshot);
+        if (snapshot.skipped) {
+          skipped.push({ id, direction: second });
+          continue;
+        }
         candidates = addContributions(
           candidates,
           snapshot.members.map(user),
@@ -164,6 +173,7 @@ export function relationshipCache(window, home) {
       return {
         results: rankCandidates(candidates),
         complete: true,
+        skipped,
         earliest: Math.min(...snapshots.map((snapshot) => snapshot.fetchedAt)),
         latest: Math.max(...snapshots.map((snapshot) => snapshot.fetchedAt)),
       };

@@ -40,8 +40,19 @@ export function readHome(document, base) {
   return { id, friendsUrl: friendsUrl.href, reverseUrl: reverseUrl?.href };
 }
 
+export class UnavailableRelationshipError extends Error {}
+
 export function readRelationships(window, html, owner, base) {
   const document = new window.DOMParser().parseFromString(html, "text/html");
+  const notice = document.querySelector("#colunmNotice");
+  if (
+    !document.querySelector("#headerProfile, #memberUserList") &&
+    notice?.querySelector("h2")?.textContent.trim() === "呜咕，出错了" &&
+    notice.querySelector("p.text")?.textContent.trim() ===
+      "啊噢，你访问的页面似乎被 Bangumi 娘吃掉了。" &&
+    notice.querySelector('img[src="/img/bangumi/404.png"]')
+  )
+    throw new UnavailableRelationshipError("原站关系列表不可访问");
   if (identity(document, base) !== owner) throw new Error("关系页面身份不匹配");
   const list = document.querySelector("#memberUserList.usersMedium");
   if (!list) throw new Error("缺少好友列表");
