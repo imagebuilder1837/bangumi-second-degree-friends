@@ -382,7 +382,7 @@
     dialog.setAttribute("aria-modal", "true");
     dialog.hidden = true;
     dialog.innerHTML =
-      '<div class="sdf-panel"><header class="sdf-header"><div class="sdf-controls"><button type="button" class="sdf-start">开始寻找</button><select aria-label="发现模式"><option value="friends/friends">好友的好友</option><option value="friends/rev_friends">好友的反向好友</option><option value="rev_friends/friends">反向好友的好友</option><option value="rev_friends/rev_friends">反向好友的反向好友</option></select><button type="button" class="sdf-close" aria-label="关闭" title="关闭">×</button></div><div class="sdf-status"><p role="status">尚未开始</p><progress aria-label="扫描进度" hidden></progress><details hidden><summary>缓存详情</summary><p></p></details></div></header><div class="sdf-results" tabindex="0" role="region" aria-label="候选用户列表"><ol></ol><p class="sdf-empty">点击“开始寻找”，发现二度好友</p></div></div>';
+      '<div class="sdf-panel"><header class="sdf-header"><div class="sdf-controls"><button type="button" class="sdf-start">开始寻找</button><select aria-label="发现模式"><option value="friends/friends">好友的好友</option><option value="friends/rev_friends">好友的反向好友</option><option value="rev_friends/friends">反向好友的好友</option><option value="rev_friends/rev_friends">反向好友的反向好友</option></select><button type="button" class="sdf-close" aria-label="关闭" title="关闭">×</button></div><div class="sdf-status"><p role="status">尚未开始</p><progress aria-label="扫描进度" hidden></progress></div></header><div class="sdf-results" tabindex="0" role="region" aria-label="候选用户列表"><ol></ol><p class="sdf-empty">点击“开始寻找”，发现二度好友</p></div></div>';
     let scroll;
     const hide = () => {
       if (dialog.hidden) return;
@@ -425,8 +425,8 @@
     #second-degree-friends-dialog [hidden] { display: none !important; }
     #second-degree-friends-dialog:not([hidden]) { display: grid; place-items: center; }
     #second-degree-friends-dialog .sdf-panel { box-sizing: border-box; display: flex; flex-direction: column; width: min(780px, 100%); height: min(820px, 85dvh); min-height: 0; overflow: hidden; background: var(--sdf-bg); border: 1px solid var(--sdf-border); border-radius: 10px; box-shadow: 0 8px 40px #0003; }
-    #second-degree-friends-dialog .sdf-header { flex: none; padding: 20px 22px 16px; border-bottom: 1px solid var(--sdf-border); }
-    #second-degree-friends-dialog .sdf-controls { display: flex; align-items: center; gap: 10px; }
+    #second-degree-friends-dialog .sdf-header { box-sizing: border-box; flex: none; display: flex; flex-direction: column; min-height: 0; max-height: calc(100% - 120px); padding: 20px 22px 16px; border-bottom: 1px solid var(--sdf-border); }
+    #second-degree-friends-dialog .sdf-controls { flex: none; display: flex; align-items: center; gap: 10px; }
     #second-degree-friends-dialog button, #second-degree-friends-dialog select { box-sizing: border-box; max-width: 100%; border: 1px solid var(--sdf-border); border-radius: 16px; padding: 4px 12px; background: var(--sdf-soft); color: inherit; font: inherit; line-height: 20px; }
     #second-degree-friends-dialog button { cursor: pointer; }
     #second-degree-friends-dialog .sdf-start { flex-shrink: 0; border-color: var(--sdf-accent); background: var(--sdf-accent); color: #fff; font-weight: 600; }
@@ -434,7 +434,9 @@
     #second-degree-friends-dialog button:disabled, #second-degree-friends-dialog select:disabled { opacity: .55; cursor: default; }
     #second-degree-friends-dialog :focus-visible { outline: 2px solid var(--sdf-accent); outline-offset: 2px; }
     #second-degree-friends-dialog .sdf-close { flex-shrink: 0; margin-left: auto; width: 30px; height: 30px; padding: 0; border-color: transparent; background: transparent; color: var(--sdf-muted); font-size: 24px; font-weight: 300; }
-    #second-degree-friends-dialog .sdf-status { margin-top: 16px; color: var(--sdf-muted); font-size: 12px; }
+    #second-degree-friends-dialog .sdf-status { display: flex; flex-direction: column; min-height: 0; margin-top: 16px; color: var(--sdf-muted); font-size: 12px; }
+    #second-degree-friends-dialog .sdf-status > p, #second-degree-friends-dialog progress { flex: none; }
+    #second-degree-friends-dialog .sdf-disclosures { min-height: 0; overflow: auto; overscroll-behavior: contain; }
     #second-degree-friends-dialog [role="status"] { margin: 0; text-align: center; overflow-wrap: anywhere; }
     #second-degree-friends-dialog [data-warning="true"] { color: var(--sdf-accent-text); }
     #second-degree-friends-dialog progress { display: block; appearance: none; width: 100%; height: 5px; margin-top: 10px; border: 0; border-radius: 5px; overflow: hidden; background: var(--sdf-border); accent-color: var(--sdf-accent); }
@@ -443,8 +445,18 @@
     #second-degree-friends-dialog progress::-moz-progress-bar { background: var(--sdf-accent); }
     #second-degree-friends-dialog progress:not([value]) { background: linear-gradient(90deg, var(--sdf-border), var(--sdf-accent), var(--sdf-border)); }
     #second-degree-friends-dialog details { margin-top: 8px; text-align: center; }
-    #second-degree-friends-dialog summary { display: inline list-item; cursor: pointer; }
+    #second-degree-friends-dialog summary { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 3px; list-style: none; cursor: pointer; }
+    #second-degree-friends-dialog summary::-webkit-details-marker { display: none; }
+    #second-degree-friends-dialog summary::before { content: ""; width: 5px; height: 5px; border: solid currentColor; border-width: 0 1px 1px 0; transform: rotate(-45deg); transition: transform .15s ease; }
+    #second-degree-friends-dialog details[open] > summary::before { transform: rotate(45deg); }
+    #second-degree-friends-dialog summary:hover { color: var(--sdf-text); background: var(--sdf-soft); }
     #second-degree-friends-dialog details p { margin: 4px 0 0; overflow-wrap: anywhere; }
+    #second-degree-friends-dialog .sdf-detail-body { box-sizing: border-box; max-height: min(140px, 22dvh); margin-top: 6px; padding: 8px 12px; overflow: auto; overscroll-behavior: contain; text-align: left; background: var(--sdf-soft); border: 1px solid var(--sdf-border); border-radius: 5px; }
+    #second-degree-friends-dialog .sdf-detail-body > p { margin: 0 0 6px; }
+    #second-degree-friends-dialog .sdf-skip-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 3px 0; }
+    #second-degree-friends-dialog .sdf-skip-row + .sdf-skip-row { border-top: 1px dotted var(--sdf-border); }
+    #second-degree-friends-dialog .sdf-skip-row a { min-width: 0; overflow-wrap: anywhere; }
+    #second-degree-friends-dialog .sdf-skip-row span { font-size: 11px; }
     #second-degree-friends-dialog .sdf-results { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px 16px 20px 22px; }
     #second-degree-friends-dialog ol { list-style: none; margin: 0; padding: 0; }
     #second-degree-friends-dialog li { padding: 0; border-radius: 6px; margin: 0 0 8px; border: 1px solid var(--sdf-border); background: var(--sdf-bg); }
@@ -498,30 +510,32 @@
     const start = dialog.querySelector("button");
     const status = dialog.querySelector('[role="status"]');
     const progressBar = dialog.querySelector("progress");
-    const cacheDetails = dialog.querySelector("details");
     const skipDetails = document.createElement("details");
     skipDetails.hidden = true;
-    skipDetails.innerHTML = "<summary>跳过详情</summary><div></div>";
-    // Keep a potentially long details list in the scrollable results region.
-    dialog.querySelector(".sdf-results").prepend(skipDetails);
+    skipDetails.innerHTML =
+      '<summary>跳过详情</summary><div class="sdf-detail-body"><p>以下 [已注销] 用户的关系列表暂不可访问，已跳过。</p><div class="sdf-skip-list"></div></div>';
+    const disclosures = document.createElement("div");
+    disclosures.className = "sdf-disclosures";
+    disclosures.append(skipDetails);
+    dialog.querySelector(".sdf-status").append(disclosures);
     const skipSummary = (skipped = []) =>
       skipped.length ? `，跳过 ${skipped.length} 位 [已注销] 用户` : "";
     const showSkipped = (skipped = []) => {
       skipDetails.hidden = skipped.length === 0;
-      const content = skipDetails.querySelector("div");
+      const content = skipDetails.querySelector(".sdf-skip-list");
       content.replaceChildren();
       for (const { id, direction } of skipped) {
-        const item = document.createElement("p");
+        const item = document.createElement("div");
+        item.className = "sdf-skip-row";
         const link = document.createElement("a");
         link.href = `/user/${encodeURIComponent(id)}`;
         link.className = "l";
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         link.textContent = id;
-        item.append(
-          link,
-          ` · ${direction === "friends" ? "好友" : "反向好友"} · 原站错误页`,
-        );
+        const relation = document.createElement("span");
+        relation.textContent = direction === "friends" ? "好友" : "反向好友";
+        item.append(link, relation);
         content.append(item);
       }
     };
@@ -678,8 +692,6 @@
       viewed = true;
       resetResults();
       progressBar.hidden = true;
-      cacheDetails.hidden = true;
-      cacheDetails.open = false;
       empty.textContent = "正在读取缓存…";
       setStatus("正在读取缓存");
       let outcome;
@@ -699,13 +711,6 @@
       empty.textContent = outcome
         ? "此模式下暂无候选用户"
         : "点击“开始寻找”，发现二度好友";
-      if (outcome) {
-        const formatTime = (value) =>
-          new window.Date(value).toLocaleString("zh-CN", { hour12: false });
-        cacheDetails.querySelector("p").textContent =
-          `关系获取时间：${formatTime(outcome.earliest)} — ${formatTime(outcome.latest)}`;
-        cacheDetails.hidden = false;
-      }
       if (window.Date.now() < cooldownUntil) return;
       setStatus(
         outcome
@@ -738,8 +743,6 @@
       mode.disabled = true;
       if (!dialog.hidden) start.focus();
       setStatus("正在获取主页关系");
-      cacheDetails.hidden = true;
-      cacheDetails.open = false;
       setProgress();
       empty.textContent = "正在寻找候选用户…";
       resetResults();

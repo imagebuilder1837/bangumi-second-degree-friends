@@ -195,7 +195,7 @@ test("stopping before totals arrive hides the indeterminate bar without pretendi
   assert.match(status(document).textContent, /已停止，结果未完成/);
 });
 
-test("cache time range is readable and initially collapsed while the main status stays compact", async (t) => {
+test("cached results show a compact summary without cache details or timestamps", async (t) => {
   const storage = sharedStorage();
   const time = Date.UTC(2026, 9, 21, 12, 0);
   const live = component(t, {
@@ -213,7 +213,7 @@ test("cache time range is readable and initially collapsed while the main status
   open(live.document);
   button(live.document, "开始寻找").click();
   await finished(live.document);
-  const { document, window, requests } = component(t, {
+  const { document, requests } = component(t, {
     configure: storage.install,
   });
   open(document);
@@ -221,17 +221,15 @@ test("cache time range is readable and initially collapsed while the main status
   assert.equal(status(document).textContent, "已载入缓存 · 1 位候选用户");
   assert.equal(document.querySelector("progress").hidden, true);
   const details = document.querySelector("details");
-  assert.equal(details.hidden, false);
-  assert.equal(details.open, false);
-  const readable = new window.Date(time).toLocaleString("zh-CN", {
-    hour12: false,
-  });
-  assert.equal(
-    details.querySelector("p").textContent,
-    `关系获取时间：${readable} — ${readable}`,
+  assert.equal(details.hidden, true);
+  assert.doesNotMatch(
+    document.querySelector(".sdf-status").textContent,
+    /缓存详情|关系获取时间|2026/,
   );
-  details.querySelector("summary").click();
-  assert.equal(details.open, true);
+  assert.equal(
+    document.querySelector('li[data-user-id="zed"]').dataset.medal,
+    "gold",
+  );
   button(document, "开始寻找").click();
   assert.equal(details.hidden, true);
   assert.equal(details.open, false);

@@ -67,6 +67,14 @@ test("unavailable deleted intermediates complete with explicit skips, details an
       );
       assert.equal(details.hidden, false);
       assert.equal(details.open, false);
+      assert.ok(details.closest(".sdf-status"));
+      assert.equal(app.document.querySelectorAll("details").length, 1);
+      assert.doesNotMatch(
+        app.document.querySelector(".sdf-status").textContent,
+        /缓存详情|关系获取时间/,
+      );
+      details.querySelector("summary").click();
+      assert.equal(details.open, true);
       assert.match(details.textContent, /bob/);
       assert.match(
         details.textContent,
