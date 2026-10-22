@@ -37,7 +37,20 @@ export function readHome(document, base) {
     )
       throw new Error("反向好友链接身份不匹配");
   }
-  return { id, friendsUrl: friendsUrl.href, reverseUrl: reverseUrl?.href };
+  const name =
+    document.querySelector("#headerProfile .name > a")?.textContent.trim() ??
+    id;
+  const background = document.querySelector("#headerProfile .avatarNeue")?.style
+    .backgroundImage;
+  const image = background && /^url\(["']?(.*?)["']?\)$/.exec(background)?.[1];
+  const avatar = image ? new URL(image, base).href : "";
+  return {
+    id,
+    name,
+    avatar,
+    friendsUrl: friendsUrl.href,
+    reverseUrl: reverseUrl?.href,
+  };
 }
 
 export class UnavailableRelationshipError extends Error {}
@@ -63,6 +76,7 @@ export function readRelationships(window, html, owner, base) {
   )
     throw new Error("无法识别的好友列表");
   const members = new Map();
+  let missingIdentifiers = 0;
   for (const item of list.children) {
     if (!item.matches("li.user")) throw new Error("无效的好友条目");
     // Query links locally to avoid the costly compound selector on large lists.
@@ -72,16 +86,27 @@ export function readRelationships(window, html, owner, base) {
         link.parentElement.parentElement?.matches(".userContainer"),
     );
     if (!anchor) throw new Error("无效的好友条目");
+    const background = anchor.querySelector(".userImage > .avatarNeue")?.style
+      .backgroundImage;
+    const image =
+      background && /^url\(["']?(.*?)["']?\)$/.exec(background)?.[1];
+    if (!image) throw new Error("无效的好友条目");
+    const avatar = new URL(image, base).href;
     const url = new URL(anchor.getAttribute("href"), base);
+    if (
+      url.origin === new URL(base).origin &&
+      url.pathname === "/user/" &&
+      !url.search &&
+      !url.hash
+    ) {
+      missingIdentifiers++;
+      continue;
+    }
     const match = /^\/user\/([^/]+)$/.exec(url.pathname);
     if (url.origin !== new URL(base).origin || !match)
       throw new Error("无效的好友条目");
     const id = decodeURIComponent(match[1]);
-    const background = anchor.querySelector(".userImage > .avatarNeue").style
-      .backgroundImage;
-    const avatar = new URL(/^url\(["']?(.*?)["']?\)$/.exec(background)[1], base)
-      .href;
     members.set(id, { id, name: anchor.textContent.trim(), avatar });
   }
-  return members;
+  return { members, missingIdentifiers };
 }

@@ -63,7 +63,7 @@ test("relationship entries retain the first structurally valid user link", async
       const { window } = new JSDOM("");
       t.after(() => window.close());
       assert.deepEqual(
-        [...readRelationships(window, html, "alice", base).values()],
+        [...readRelationships(window, html, "alice", base).members.values()],
         [
           {
             id: "bob",
@@ -71,6 +71,61 @@ test("relationship entries retain the first structurally valid user link", async
             avatar: "https://lain.bgm.tv/pic/user/l/custom_bob.jpg?r=7&hd=1",
           },
         ],
+      );
+    });
+  }
+});
+
+test("missing user identifiers are counted while valid and duplicate relationships remain usable", (t) => {
+  const { window } = new JSDOM("");
+  t.after(() => window.close());
+  const document = new JSDOM(friends).window.document;
+  const list = document.querySelector("#memberUserList");
+  list.append(list.firstElementChild.cloneNode(true));
+  const broken = list.firstElementChild.cloneNode(true);
+  broken.querySelector("a.avatar").setAttribute("href", "/user/");
+  list.append(broken);
+  const result = readRelationships(
+    window,
+    document.documentElement.outerHTML,
+    "alice",
+    base,
+  );
+  assert.equal(result.missingIdentifiers, 1);
+  assert.deepEqual([...result.members.keys()], ["bob"]);
+  assert.throws(
+    () =>
+      readRelationships(
+        window,
+        friends.replace("/user/bob", "https://other.example/user/"),
+        "alice",
+        base,
+      ),
+    /无效的好友条目/,
+  );
+});
+
+test("missing identifiers do not excuse malformed avatar structure or format", async (t) => {
+  for (const damage of ["missing-node", "missing-background", "empty-url"]) {
+    await t.test(damage, (t) => {
+      const { window } = new JSDOM(friends);
+      t.after(() => window.close());
+      const anchor = window.document.querySelector("#memberUserList a.avatar");
+      anchor.setAttribute("href", "/user/");
+      const avatar = anchor.querySelector(".avatarNeue");
+      if (damage === "missing-node") avatar.remove();
+      else
+        avatar.style.backgroundImage =
+          damage === "empty-url" ? 'url("")' : "none";
+      assert.throws(
+        () =>
+          readRelationships(
+            window,
+            window.document.documentElement.outerHTML,
+            "alice",
+            base,
+          ),
+        /无效的好友条目/,
       );
     });
   }

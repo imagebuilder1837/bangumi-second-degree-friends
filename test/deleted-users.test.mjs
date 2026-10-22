@@ -52,18 +52,18 @@ test("unavailable deleted intermediates complete with explicit skips, details an
     open(live, mode);
     button(live.document, "开始寻找").click();
     await waitFor(() => button(live.document, "开始寻找"));
-    assert.match(status(live.document), /^完成.*跳过 1 位 \[已注销\] 用户/);
+    assert.match(status(live.document), /^完成.*跳过 1 项关系读取异常/);
     assert.match(status(live.document), /2\/2，成功 1，失败 0，跳过 1/);
     const cached = component(t, { configure: storage.install });
     open(cached, mode);
     await waitFor(() => status(cached.document).startsWith("已载入缓存"));
     for (const app of [live, cached]) {
-      assert.match(status(app.document), /跳过 1 位 \[已注销\] 用户/);
+      assert.match(status(app.document), /跳过 1 项关系读取异常/);
       const row = app.document.querySelector('li[data-user-id="zed"]');
       assert.equal(row.dataset.medal, "gold");
       assert.equal(row.querySelector(".count").textContent, "1");
       const details = [...app.document.querySelectorAll("details")].find(
-        (d) => d.querySelector("summary").textContent === "跳过详情",
+        (d) => d.querySelector("summary").textContent === "详情",
       );
       assert.equal(details.hidden, false);
       assert.equal(details.open, false);
@@ -75,7 +75,8 @@ test("unavailable deleted intermediates complete with explicit skips, details an
       );
       details.querySelector("summary").click();
       assert.equal(details.open, true);
-      assert.match(details.textContent, /bob/);
+      assert.match(details.textContent, /已注销用户的关系列表不可访问/);
+      assert.equal(details.querySelector("a[title]").title, "[已注销]");
       assert.match(
         details.textContent,
         new RegExp(mode.endsWith("rev_friends") ? "反向好友" : "好友"),

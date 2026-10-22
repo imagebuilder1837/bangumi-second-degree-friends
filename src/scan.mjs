@@ -1,5 +1,6 @@
 import { readRelationships, UnavailableRelationshipError } from "./site.mjs";
 import { requestText } from "./requests.mjs";
+import { skippedRelationship } from "./issues.mjs";
 import { addContributions, rankCandidates } from "./candidates.mjs";
 
 export async function scanRelationships(
@@ -18,14 +19,30 @@ export async function scanRelationships(
     relationships: Object.create(null),
     users: Object.create(null),
   };
-  const read = async (id, url) => {
+  const skipped = [];
+  const failures = [];
+  const read = async (user, url) => {
+    const { id } = user;
     const text = await requestText(window, url, signal, rateLimited);
     signal.throwIfAborted();
-    const members = readRelationships(window, text, id, url);
+    const { members, missingIdentifiers } = readRelationships(
+      window,
+      text,
+      id,
+      url,
+    );
     const direction = new URL(url).pathname.split("/").at(-1);
     staged.relationships[id] ??= Object.create(null);
     staged.relationships[id][direction] = {
       members: [...members.keys()],
+      fetchedAt: window.Date.now(),
+      ...(missingIdentifiers ? { missingIdentifiers } : {}),
+    };
+    if (missingIdentifiers)
+      skipped.push(skippedRelationship(user, direction, missingIdentifiers));
+    staged.users[id] = {
+      name: user.name,
+      avatar: user.avatar,
       fetchedAt: window.Date.now(),
     };
     for (const user of members.values())
@@ -36,29 +53,47 @@ export async function scanRelationships(
       };
     return members;
   };
-  const firstMembers = await read(home.id, homeUrl(first));
-  const excluded =
-    first === second ? firstMembers : await read(home.id, homeUrl(second));
+  const readHome = async (direction) => {
+    try {
+      const members = await read(home, homeUrl(direction));
+      update([], "", undefined, skipped, failures);
+      return members;
+    } catch (error) {
+      signal.throwIfAborted();
+      failures.push({ ...home, direction, reason: error.message });
+      update([], "", undefined, skipped, failures);
+      throw error;
+    }
+  };
+  const firstMembers = await readHome(first);
+  const excluded = first === second ? firstMembers : await readHome(second);
   const excludedIds = new Set([home.id, ...excluded.keys()]);
   let candidates = new Map();
   const intermediates = [...firstMembers.values()];
   let next = 0;
   let succeeded = 0;
   let failed = 0;
-  const skipped = [];
+  let skippedIntermediates = 0;
   const publish = () => {
     signal.throwIfAborted();
     const results = rankCandidates(candidates);
     const counts = {
-      processed: succeeded + failed + skipped.length,
+      processed: succeeded + failed + skippedIntermediates,
       total: intermediates.length,
       succeeded,
       failed,
-      skipped: skipped.length,
+      skipped: skippedIntermediates,
     };
-    const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}${skipped.length ? `，跳过 ${skipped.length}` : ""}`;
-    update(results, progress, counts, skipped);
-    return { results, progress, counts, skipped, complete: failed === 0 };
+    const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}${skippedIntermediates ? `，跳过 ${skippedIntermediates}` : ""}`;
+    update(results, progress, counts, skipped, failures);
+    return {
+      results,
+      progress,
+      counts,
+      skipped,
+      failures,
+      complete: failed === 0,
+    };
   };
   publish();
   const worker = async () => {
@@ -70,27 +105,37 @@ export async function scanRelationships(
         home.friendsUrl,
       ).href;
       try {
-        const members = await read(intermediary.id, url);
+        const members = await read(intermediary, url);
         candidates = addContributions(
           candidates,
           members.values(),
           intermediary,
           excludedIds,
         );
-        succeeded++;
+        if (staged.relationships[intermediary.id][second].missingIdentifiers)
+          skippedIntermediates++;
+        else succeeded++;
       } catch (error) {
         signal.throwIfAborted();
         if (
           intermediary.name === "[已注销]" &&
           error instanceof UnavailableRelationshipError
         ) {
-          skipped.push({ id: intermediary.id, direction: second });
+          skipped.push(skippedRelationship(intermediary, second));
+          skippedIntermediates++;
           staged.relationships[intermediary.id] ??= Object.create(null);
           staged.relationships[intermediary.id][second] = {
             skipped: true,
             fetchedAt: window.Date.now(),
           };
-        } else failed++;
+        } else {
+          failed++;
+          failures.push({
+            ...intermediary,
+            direction: second,
+            reason: error.message,
+          });
+        }
       }
       publish();
     }

@@ -6,6 +6,7 @@
 | [site](../src/site.mjs) | 原站页面解析与身份校验 |
 | [requests](../src/requests.mjs) | 关系请求、重试与限流报告 |
 | [scan](../src/scan.mjs) | 两跳关系扫描 |
+| [issues](../src/issues.mjs) | 实时与缓存跳过记录的统一表达 |
 | [candidates](../src/candidates.mjs) | 候选计数与排名 |
 | [cache](../src/cache.mjs) | 关系快照存取与缓存结果重建 |
 | [view](../src/view.mjs) | 弹窗、任务状态与结果浏览 |

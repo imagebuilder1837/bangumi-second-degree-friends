@@ -242,7 +242,14 @@ test("skip observations persist independently by direction and replace rather th
   const fresh = relationshipCache(window, home);
   const skipped = await fresh.lookup("friends/friends");
   assert.deepEqual(skipped.results, []);
-  assert.deepEqual(skipped.skipped, [{ id: "bob", direction: "friends" }]);
+  const expectedSkip = {
+    id: "bob",
+    name: "bob",
+    avatar: "",
+    direction: "friends",
+    reason: "已注销用户的关系列表不可访问",
+  };
+  assert.deepEqual(skipped.skipped, [expectedSkip]);
   assert.equal(skipped.latest, 2);
   const reverse = await fresh.lookup("friends/rev_friends");
   assert.deepEqual(
@@ -252,7 +259,7 @@ test("skip observations persist independently by direction and replace rather th
   assert.deepEqual(reverse.skipped, []);
   await fresh.commit(staged(["stale"], 1), signal());
   assert.deepEqual((await fresh.lookup("friends/friends")).skipped, [
-    { id: "bob", direction: "friends" },
+    expectedSkip,
   ]);
   await fresh.commit(staged(["restored"], 3), signal());
   const restored = await fresh.lookup("friends/friends");

@@ -100,7 +100,7 @@ async function attempt(window, url, signal, rateLimited) {
                 ? retryAfter(window, response.headers?.get("Retry-After"))
                 : undefined;
             throw new TransientError(
-              `关系读取失败：HTTP ${response.status}`,
+              response.status === 408 ? "关系请求超时" : "服务器暂时不可用",
               retryAt,
             );
           }

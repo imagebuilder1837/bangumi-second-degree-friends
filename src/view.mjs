@@ -47,7 +47,12 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
       ...dialog.querySelectorAll(
         "button, select, a[href], summary, [tabindex]",
       ),
-    ].filter((node) => !node.disabled && !node.closest("[hidden]"));
+    ].filter(
+      (node) =>
+        !node.disabled &&
+        !node.closest("[hidden]") &&
+        (!node.closest("details:not([open])") || node.matches("summary")),
+    );
   dialog.querySelector(".sdf-close").addEventListener("click", hide);
   document.addEventListener("focusin", (event) => {
     if (!dialog.hidden && !dialog.contains(event.target))
@@ -106,10 +111,20 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     #second-degree-friends-dialog details p { margin: 4px 0 0; overflow-wrap: anywhere; }
     #second-degree-friends-dialog .sdf-detail-body { box-sizing: border-box; max-height: min(140px, 22dvh); margin-top: 6px; padding: 8px 12px; overflow: auto; overscroll-behavior: contain; text-align: left; background: var(--sdf-soft); border: 1px solid var(--sdf-border); border-radius: 5px; }
     #second-degree-friends-dialog .sdf-detail-body > p { margin: 0 0 6px; }
-    #second-degree-friends-dialog .sdf-skip-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 3px 0; }
-    #second-degree-friends-dialog .sdf-skip-row + .sdf-skip-row { border-top: 1px dotted var(--sdf-border); }
-    #second-degree-friends-dialog .sdf-skip-row a { min-width: 0; overflow-wrap: anywhere; }
-    #second-degree-friends-dialog .sdf-skip-row span { font-size: 11px; }
+    #second-degree-friends-dialog .sdf-detail-group + .sdf-detail-group { margin-top: 10px; }
+    #second-degree-friends-dialog .sdf-detail-group h3 { margin: 0 0 4px; color: var(--sdf-text); font-size: 12px; font-weight: 600; }
+    #second-degree-friends-dialog .sdf-detail-group[data-kind="failures"] h3 { color: var(--sdf-accent-text); }
+    #second-degree-friends-dialog .sdf-detail-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 6px 20px; padding: 5px 0; }
+    #second-degree-friends-dialog .sdf-detail-row + .sdf-detail-row { border-top: 1px dotted var(--sdf-border); }
+    #second-degree-friends-dialog .sdf-detail-user { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+    #second-degree-friends-dialog .sdf-detail-user a { min-width: 0; }
+    #second-degree-friends-dialog .sdf-detail-user a:first-child { flex: none; }
+    #second-degree-friends-dialog .sdf-detail-user img { width: 24px; height: 24px; background: var(--sdf-border); border-radius: 3px; }
+    #second-degree-friends-dialog .sdf-detail-direction { flex: none; font-size: 11px; }
+    #second-degree-friends-dialog .sdf-detail-reason { min-width: 0; text-align: right; overflow-wrap: anywhere; font-size: 11px; }
+    @media (max-width: 640px) {
+      #second-degree-friends-dialog .sdf-detail-row { grid-template-columns: minmax(0, 1fr); }
+    }
     #second-degree-friends-dialog .sdf-results { min-height: 0; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; scrollbar-gutter: stable; padding: 16px 16px 28px 22px; }
     #second-degree-friends-dialog ol { list-style: none; margin: 0; padding: 0; }
     #second-degree-friends-dialog li { padding: 0; border-radius: 6px; margin: 0 0 8px; border: 1px solid var(--sdf-border); background: var(--sdf-bg); }
@@ -166,33 +181,68 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
   const start = dialog.querySelector("button");
   const status = dialog.querySelector('[role="status"]');
   const progressBar = dialog.querySelector("progress");
-  const skipDetails = document.createElement("details");
-  skipDetails.hidden = true;
-  skipDetails.innerHTML =
-    '<summary>跳过详情</summary><div class="sdf-detail-body"><p>以下 [已注销] 用户的关系列表暂不可访问，已跳过。</p><div class="sdf-skip-list"></div></div>';
+  const details = document.createElement("details");
+  details.hidden = true;
+  details.innerHTML =
+    '<summary>详情</summary><div class="sdf-detail-body"></div>';
   const disclosures = document.createElement("div");
   disclosures.className = "sdf-disclosures";
-  disclosures.append(skipDetails);
+  disclosures.append(details);
   dialog.querySelector(".sdf-status").append(disclosures);
+  const detailGroups = ["failures", "skipped"].map((kind) => {
+    const section = document.createElement("section");
+    section.className = "sdf-detail-group";
+    section.dataset.kind = kind;
+    section.hidden = true;
+    section.append(document.createElement("h3"));
+    details.querySelector(".sdf-detail-body").append(section);
+    return { section, rows: new Map() };
+  });
   const skipSummary = (skipped = []) =>
-    skipped.length ? `，跳过 ${skipped.length} 位 [已注销] 用户` : "";
-  const showSkipped = (skipped = []) => {
-    skipDetails.hidden = skipped.length === 0;
-    const content = skipDetails.querySelector(".sdf-skip-list");
-    content.replaceChildren();
-    for (const { id, direction } of skipped) {
-      const item = document.createElement("div");
-      item.className = "sdf-skip-row";
-      const link = document.createElement("a");
-      link.href = `/user/${encodeURIComponent(id)}`;
-      link.className = "l";
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.textContent = id;
-      const relation = document.createElement("span");
-      relation.textContent = direction === "friends" ? "好友" : "反向好友";
-      item.append(link, relation);
-      content.append(item);
+    skipped.length ? `，跳过 ${skipped.length} 项关系读取异常` : "";
+  const showDetails = (skipped = [], failures = []) => {
+    details.hidden = skipped.length + failures.length === 0;
+    for (const [index, records] of [failures, skipped].entries()) {
+      const { section, rows } = detailGroups[index];
+      section.hidden = records.length === 0;
+      section.querySelector("h3").textContent =
+        `${index === 0 ? "读取失败" : "已跳过"} · ${records.length}`;
+      const active = new Set();
+      for (const record of records) {
+        const key = `${record.id}/${record.direction}`;
+        active.add(key);
+        if (rows.has(key)) continue;
+        const item = document.createElement("div");
+        item.className = "sdf-detail-row";
+        const user = document.createElement("div");
+        user.className = "sdf-detail-user";
+        const avatarLink = userLink(record);
+        const avatar = avatarLink.querySelector("img");
+        avatar.width = avatar.height = 24;
+        if (!record.avatar) avatar.removeAttribute("src");
+        const name = document.createElement("a");
+        name.href = avatarLink.href;
+        name.className = "l";
+        name.target = "_blank";
+        name.rel = "noopener noreferrer";
+        name.textContent = record.name ?? record.id;
+        name.title = record.id;
+        const relation = document.createElement("span");
+        relation.className = "sdf-detail-direction";
+        relation.textContent = ` · ${record.direction === "friends" ? "好友" : "反向好友"}`;
+        user.append(avatarLink, name, relation);
+        const reason = document.createElement("span");
+        reason.className = "sdf-detail-reason";
+        reason.textContent = record.reason;
+        item.append(user, reason);
+        rows.set(key, item);
+        section.append(item);
+      }
+      for (const [key, row] of rows) {
+        if (active.has(key)) continue;
+        row.remove();
+        rows.delete(key);
+      }
     }
   };
   const resultsRegion = dialog.querySelector(".sdf-results");
@@ -361,8 +411,8 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     resultsRegion.scrollTop = scrollTop;
   };
   const resetResults = () => {
-    showSkipped();
-    skipDetails.open = false;
+    showDetails();
+    details.open = false;
     expanded.clear();
     visibleContributors.clear();
     visibleRanks = 50;
@@ -392,7 +442,7 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     }
     if (request !== cacheRequest) return;
     render(outcome?.results ?? [], Boolean(outcome));
-    showSkipped(outcome?.skipped);
+    showDetails(outcome?.skipped);
     if (window.Date.now() < cooldownUntil) return;
     setStatus(
       outcome
@@ -449,17 +499,17 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
             Math.min(Math.max(0, until - window.Date.now()), 2147483647),
           );
         },
-        update: (results, progress, counts, skipped) => {
+        update: (results, progress, counts, skipped, failures) => {
           if (task !== current || current.controller.signal.aborted) return;
           current.progress = progress;
           render(results);
-          showSkipped(skipped);
+          showDetails(skipped, failures);
           setProgress(counts);
-          setStatus(`扫描进度：${progress}`, counts.failed > 0);
+          if (counts) setStatus(`扫描进度：${progress}`, counts.failed > 0);
         },
       });
       render(outcome.results, outcome.complete);
-      showSkipped(outcome.skipped);
+      showDetails(outcome.skipped, outcome.failures);
       setProgress(outcome.counts);
       setStatus(
         `${outcome.complete ? "完成" : "读取失败，未完成"}${skipSummary(outcome.skipped)}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,

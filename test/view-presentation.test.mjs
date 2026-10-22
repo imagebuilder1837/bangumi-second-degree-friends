@@ -182,7 +182,8 @@ test("progress becomes determinate only after totals are known and counts failed
   );
   assert.match(status(document).textContent, /未完成.*失败 1/);
   assert.equal(document.querySelectorAll("[data-medal]").length, 0);
-  assert.equal(document.querySelector("details").hidden, true);
+  assert.equal(document.querySelector("details").hidden, false);
+  assert.match(document.querySelector("details").textContent, /读取失败 · 1/);
 });
 
 test("stopping before totals arrive hides the indeterminate bar without pretending completion", async (t) => {

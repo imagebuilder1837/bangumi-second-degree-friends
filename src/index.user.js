@@ -57,7 +57,21 @@
       )
         throw new Error("反向好友链接身份不匹配");
     }
-    return { id, friendsUrl: friendsUrl.href, reverseUrl: reverseUrl?.href };
+    const name =
+      document.querySelector("#headerProfile .name > a")?.textContent.trim() ??
+      id;
+    const background = document.querySelector("#headerProfile .avatarNeue")
+      ?.style.backgroundImage;
+    const image =
+      background && /^url\(["']?(.*?)["']?\)$/.exec(background)?.[1];
+    const avatar = image ? new URL(image, base).href : "";
+    return {
+      id,
+      name,
+      avatar,
+      friendsUrl: friendsUrl.href,
+      reverseUrl: reverseUrl?.href,
+    };
   }
 
   class UnavailableRelationshipError extends Error {}
@@ -84,6 +98,7 @@
     )
       throw new Error("无法识别的好友列表");
     const members = new Map();
+    let missingIdentifiers = 0;
     for (const item of list.children) {
       if (!item.matches("li.user")) throw new Error("无效的好友条目");
       // Query links locally to avoid the costly compound selector on large lists.
@@ -93,20 +108,29 @@
           link.parentElement.parentElement?.matches(".userContainer"),
       );
       if (!anchor) throw new Error("无效的好友条目");
+      const background = anchor.querySelector(".userImage > .avatarNeue")?.style
+        .backgroundImage;
+      const image =
+        background && /^url\(["']?(.*?)["']?\)$/.exec(background)?.[1];
+      if (!image) throw new Error("无效的好友条目");
+      const avatar = new URL(image, base).href;
       const url = new URL(anchor.getAttribute("href"), base);
+      if (
+        url.origin === new URL(base).origin &&
+        url.pathname === "/user/" &&
+        !url.search &&
+        !url.hash
+      ) {
+        missingIdentifiers++;
+        continue;
+      }
       const match = /^\/user\/([^/]+)$/.exec(url.pathname);
       if (url.origin !== new URL(base).origin || !match)
         throw new Error("无效的好友条目");
       const id = decodeURIComponent(match[1]);
-      const background = anchor.querySelector(".userImage > .avatarNeue").style
-        .backgroundImage;
-      const avatar = new URL(
-        /^url\(["']?(.*?)["']?\)$/.exec(background)[1],
-        base,
-      ).href;
       members.set(id, { id, name: anchor.textContent.trim(), avatar });
     }
-    return members;
+    return { members, missingIdentifiers };
   }
 
   class TransientError extends Error {
@@ -211,7 +235,7 @@
                   ? retryAfter(window, response.headers?.get("Retry-After"))
                   : undefined;
               throw new TransientError(
-                `关系读取失败：HTTP ${response.status}`,
+                response.status === 408 ? "关系请求超时" : "服务器暂时不可用",
                 retryAt,
               );
             }
@@ -248,6 +272,20 @@
         await wait(window, delay, signal);
       }
     }
+  }
+
+  // Both live scans and cached observations expose the same user-facing notices.
+  function skippedRelationship(user, direction, missingIdentifiers = 0) {
+    return {
+      id: user.id,
+      name: user.name,
+      avatar: user.avatar,
+      direction,
+      reason: missingIdentifiers
+        ? `跳过 ${missingIdentifiers} 条缺失用户标识的关系`
+        : "已注销用户的关系列表不可访问",
+      ...(missingIdentifiers ? { missingIdentifiers } : {}),
+    };
   }
 
   function addContributions(candidates, members, intermediary, excluded) {
@@ -290,14 +328,30 @@
       relationships: Object.create(null),
       users: Object.create(null),
     };
-    const read = async (id, url) => {
+    const skipped = [];
+    const failures = [];
+    const read = async (user, url) => {
+      const { id } = user;
       const text = await requestText(window, url, signal, rateLimited);
       signal.throwIfAborted();
-      const members = readRelationships(window, text, id, url);
+      const { members, missingIdentifiers } = readRelationships(
+        window,
+        text,
+        id,
+        url,
+      );
       const direction = new URL(url).pathname.split("/").at(-1);
       staged.relationships[id] ??= Object.create(null);
       staged.relationships[id][direction] = {
         members: [...members.keys()],
+        fetchedAt: window.Date.now(),
+        ...(missingIdentifiers ? { missingIdentifiers } : {}),
+      };
+      if (missingIdentifiers)
+        skipped.push(skippedRelationship(user, direction, missingIdentifiers));
+      staged.users[id] = {
+        name: user.name,
+        avatar: user.avatar,
         fetchedAt: window.Date.now(),
       };
       for (const user of members.values())
@@ -308,29 +362,47 @@
         };
       return members;
     };
-    const firstMembers = await read(home.id, homeUrl(first));
-    const excluded =
-      first === second ? firstMembers : await read(home.id, homeUrl(second));
+    const readHome = async (direction) => {
+      try {
+        const members = await read(home, homeUrl(direction));
+        update([], "", undefined, skipped, failures);
+        return members;
+      } catch (error) {
+        signal.throwIfAborted();
+        failures.push({ ...home, direction, reason: error.message });
+        update([], "", undefined, skipped, failures);
+        throw error;
+      }
+    };
+    const firstMembers = await readHome(first);
+    const excluded = first === second ? firstMembers : await readHome(second);
     const excludedIds = new Set([home.id, ...excluded.keys()]);
     let candidates = new Map();
     const intermediates = [...firstMembers.values()];
     let next = 0;
     let succeeded = 0;
     let failed = 0;
-    const skipped = [];
+    let skippedIntermediates = 0;
     const publish = () => {
       signal.throwIfAborted();
       const results = rankCandidates(candidates);
       const counts = {
-        processed: succeeded + failed + skipped.length,
+        processed: succeeded + failed + skippedIntermediates,
         total: intermediates.length,
         succeeded,
         failed,
-        skipped: skipped.length,
+        skipped: skippedIntermediates,
       };
-      const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}${skipped.length ? `，跳过 ${skipped.length}` : ""}`;
-      update(results, progress, counts, skipped);
-      return { results, progress, counts, skipped, complete: failed === 0 };
+      const progress = `${counts.processed}/${counts.total}，成功 ${succeeded}，失败 ${failed}${skippedIntermediates ? `，跳过 ${skippedIntermediates}` : ""}`;
+      update(results, progress, counts, skipped, failures);
+      return {
+        results,
+        progress,
+        counts,
+        skipped,
+        failures,
+        complete: failed === 0,
+      };
     };
     publish();
     const worker = async () => {
@@ -342,27 +414,37 @@
           home.friendsUrl,
         ).href;
         try {
-          const members = await read(intermediary.id, url);
+          const members = await read(intermediary, url);
           candidates = addContributions(
             candidates,
             members.values(),
             intermediary,
             excludedIds,
           );
-          succeeded++;
+          if (staged.relationships[intermediary.id][second].missingIdentifiers)
+            skippedIntermediates++;
+          else succeeded++;
         } catch (error) {
           signal.throwIfAborted();
           if (
             intermediary.name === "[已注销]" &&
             error instanceof UnavailableRelationshipError
           ) {
-            skipped.push({ id: intermediary.id, direction: second });
+            skipped.push(skippedRelationship(intermediary, second));
+            skippedIntermediates++;
             staged.relationships[intermediary.id] ??= Object.create(null);
             staged.relationships[intermediary.id][second] = {
               skipped: true,
               fetchedAt: window.Date.now(),
             };
-          } else failed++;
+          } else {
+            failed++;
+            failures.push({
+              ...intermediary,
+              direction: second,
+              reason: error.message,
+            });
+          }
         }
         publish();
       }
@@ -422,7 +504,12 @@
         ...dialog.querySelectorAll(
           "button, select, a[href], summary, [tabindex]",
         ),
-      ].filter((node) => !node.disabled && !node.closest("[hidden]"));
+      ].filter(
+        (node) =>
+          !node.disabled &&
+          !node.closest("[hidden]") &&
+          (!node.closest("details:not([open])") || node.matches("summary")),
+      );
     dialog.querySelector(".sdf-close").addEventListener("click", hide);
     document.addEventListener("focusin", (event) => {
       if (!dialog.hidden && !dialog.contains(event.target))
@@ -481,10 +568,20 @@
     #second-degree-friends-dialog details p { margin: 4px 0 0; overflow-wrap: anywhere; }
     #second-degree-friends-dialog .sdf-detail-body { box-sizing: border-box; max-height: min(140px, 22dvh); margin-top: 6px; padding: 8px 12px; overflow: auto; overscroll-behavior: contain; text-align: left; background: var(--sdf-soft); border: 1px solid var(--sdf-border); border-radius: 5px; }
     #second-degree-friends-dialog .sdf-detail-body > p { margin: 0 0 6px; }
-    #second-degree-friends-dialog .sdf-skip-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 3px 0; }
-    #second-degree-friends-dialog .sdf-skip-row + .sdf-skip-row { border-top: 1px dotted var(--sdf-border); }
-    #second-degree-friends-dialog .sdf-skip-row a { min-width: 0; overflow-wrap: anywhere; }
-    #second-degree-friends-dialog .sdf-skip-row span { font-size: 11px; }
+    #second-degree-friends-dialog .sdf-detail-group + .sdf-detail-group { margin-top: 10px; }
+    #second-degree-friends-dialog .sdf-detail-group h3 { margin: 0 0 4px; color: var(--sdf-text); font-size: 12px; font-weight: 600; }
+    #second-degree-friends-dialog .sdf-detail-group[data-kind="failures"] h3 { color: var(--sdf-accent-text); }
+    #second-degree-friends-dialog .sdf-detail-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 6px 20px; padding: 5px 0; }
+    #second-degree-friends-dialog .sdf-detail-row + .sdf-detail-row { border-top: 1px dotted var(--sdf-border); }
+    #second-degree-friends-dialog .sdf-detail-user { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+    #second-degree-friends-dialog .sdf-detail-user a { min-width: 0; }
+    #second-degree-friends-dialog .sdf-detail-user a:first-child { flex: none; }
+    #second-degree-friends-dialog .sdf-detail-user img { width: 24px; height: 24px; background: var(--sdf-border); border-radius: 3px; }
+    #second-degree-friends-dialog .sdf-detail-direction { flex: none; font-size: 11px; }
+    #second-degree-friends-dialog .sdf-detail-reason { min-width: 0; text-align: right; overflow-wrap: anywhere; font-size: 11px; }
+    @media (max-width: 640px) {
+      #second-degree-friends-dialog .sdf-detail-row { grid-template-columns: minmax(0, 1fr); }
+    }
     #second-degree-friends-dialog .sdf-results { min-height: 0; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; scrollbar-gutter: stable; padding: 16px 16px 28px 22px; }
     #second-degree-friends-dialog ol { list-style: none; margin: 0; padding: 0; }
     #second-degree-friends-dialog li { padding: 0; border-radius: 6px; margin: 0 0 8px; border: 1px solid var(--sdf-border); background: var(--sdf-bg); }
@@ -541,33 +638,68 @@
     const start = dialog.querySelector("button");
     const status = dialog.querySelector('[role="status"]');
     const progressBar = dialog.querySelector("progress");
-    const skipDetails = document.createElement("details");
-    skipDetails.hidden = true;
-    skipDetails.innerHTML =
-      '<summary>跳过详情</summary><div class="sdf-detail-body"><p>以下 [已注销] 用户的关系列表暂不可访问，已跳过。</p><div class="sdf-skip-list"></div></div>';
+    const details = document.createElement("details");
+    details.hidden = true;
+    details.innerHTML =
+      '<summary>详情</summary><div class="sdf-detail-body"></div>';
     const disclosures = document.createElement("div");
     disclosures.className = "sdf-disclosures";
-    disclosures.append(skipDetails);
+    disclosures.append(details);
     dialog.querySelector(".sdf-status").append(disclosures);
+    const detailGroups = ["failures", "skipped"].map((kind) => {
+      const section = document.createElement("section");
+      section.className = "sdf-detail-group";
+      section.dataset.kind = kind;
+      section.hidden = true;
+      section.append(document.createElement("h3"));
+      details.querySelector(".sdf-detail-body").append(section);
+      return { section, rows: new Map() };
+    });
     const skipSummary = (skipped = []) =>
-      skipped.length ? `，跳过 ${skipped.length} 位 [已注销] 用户` : "";
-    const showSkipped = (skipped = []) => {
-      skipDetails.hidden = skipped.length === 0;
-      const content = skipDetails.querySelector(".sdf-skip-list");
-      content.replaceChildren();
-      for (const { id, direction } of skipped) {
-        const item = document.createElement("div");
-        item.className = "sdf-skip-row";
-        const link = document.createElement("a");
-        link.href = `/user/${encodeURIComponent(id)}`;
-        link.className = "l";
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.textContent = id;
-        const relation = document.createElement("span");
-        relation.textContent = direction === "friends" ? "好友" : "反向好友";
-        item.append(link, relation);
-        content.append(item);
+      skipped.length ? `，跳过 ${skipped.length} 项关系读取异常` : "";
+    const showDetails = (skipped = [], failures = []) => {
+      details.hidden = skipped.length + failures.length === 0;
+      for (const [index, records] of [failures, skipped].entries()) {
+        const { section, rows } = detailGroups[index];
+        section.hidden = records.length === 0;
+        section.querySelector("h3").textContent =
+          `${index === 0 ? "读取失败" : "已跳过"} · ${records.length}`;
+        const active = new Set();
+        for (const record of records) {
+          const key = `${record.id}/${record.direction}`;
+          active.add(key);
+          if (rows.has(key)) continue;
+          const item = document.createElement("div");
+          item.className = "sdf-detail-row";
+          const user = document.createElement("div");
+          user.className = "sdf-detail-user";
+          const avatarLink = userLink(record);
+          const avatar = avatarLink.querySelector("img");
+          avatar.width = avatar.height = 24;
+          if (!record.avatar) avatar.removeAttribute("src");
+          const name = document.createElement("a");
+          name.href = avatarLink.href;
+          name.className = "l";
+          name.target = "_blank";
+          name.rel = "noopener noreferrer";
+          name.textContent = record.name ?? record.id;
+          name.title = record.id;
+          const relation = document.createElement("span");
+          relation.className = "sdf-detail-direction";
+          relation.textContent = ` · ${record.direction === "friends" ? "好友" : "反向好友"}`;
+          user.append(avatarLink, name, relation);
+          const reason = document.createElement("span");
+          reason.className = "sdf-detail-reason";
+          reason.textContent = record.reason;
+          item.append(user, reason);
+          rows.set(key, item);
+          section.append(item);
+        }
+        for (const [key, row] of rows) {
+          if (active.has(key)) continue;
+          row.remove();
+          rows.delete(key);
+        }
       }
     };
     const resultsRegion = dialog.querySelector(".sdf-results");
@@ -739,8 +871,8 @@
       resultsRegion.scrollTop = scrollTop;
     };
     const resetResults = () => {
-      showSkipped();
-      skipDetails.open = false;
+      showDetails();
+      details.open = false;
       expanded.clear();
       visibleContributors.clear();
       visibleRanks = 50;
@@ -770,7 +902,7 @@
       }
       if (request !== cacheRequest) return;
       render(outcome?.results ?? [], Boolean(outcome));
-      showSkipped(outcome?.skipped);
+      showDetails(outcome?.skipped);
       if (window.Date.now() < cooldownUntil) return;
       setStatus(
         outcome
@@ -827,17 +959,17 @@
               Math.min(Math.max(0, until - window.Date.now()), 2147483647),
             );
           },
-          update: (results, progress, counts, skipped) => {
+          update: (results, progress, counts, skipped, failures) => {
             if (task !== current || current.controller.signal.aborted) return;
             current.progress = progress;
             render(results);
-            showSkipped(skipped);
+            showDetails(skipped, failures);
             setProgress(counts);
-            setStatus(`扫描进度：${progress}`, counts.failed > 0);
+            if (counts) setStatus(`扫描进度：${progress}`, counts.failed > 0);
           },
         });
         render(outcome.results, outcome.complete);
-        showSkipped(outcome.skipped);
+        showDetails(outcome.skipped, outcome.failures);
         setProgress(outcome.counts);
         setStatus(
           `${outcome.complete ? "完成" : "读取失败，未完成"}${skipSummary(outcome.skipped)}：${outcome.results.length} 位候选用户；${outcome.progress}${outcome.saveWarning ? `；${outcome.saveWarning}` : ""}`,
@@ -906,6 +1038,10 @@
         if (
           !record(snapshot) ||
           !timestamp(snapshot.fetchedAt) ||
+          (snapshot.missingIdentifiers !== undefined &&
+            (snapshot.skipped === true ||
+              !Number.isSafeInteger(snapshot.missingIdentifiers) ||
+              snapshot.missingIdentifiers <= 0)) ||
           !(snapshot.skipped === true
             ? snapshot.members === undefined
             : Array.isArray(snapshot.members) &&
@@ -918,6 +1054,9 @@
             ? { skipped: true }
             : { members: [...new Set(snapshot.members)] }),
           fetchedAt: snapshot.fetchedAt,
+          ...(snapshot.missingIdentifiers
+            ? { missingIdentifiers: snapshot.missingIdentifiers }
+            : {}),
         };
       }
     }
@@ -926,7 +1065,7 @@
         !record(user) ||
         typeof user.name !== "string" ||
         typeof user.avatar !== "string" ||
-        !/^https?:\/\//.test(user.avatar) ||
+        (user.avatar !== "" && !/^https?:\/\//.test(user.avatar)) ||
         !timestamp(user.fetchedAt)
       )
         continue;
@@ -1031,14 +1170,33 @@
         const user = (id) => ({ id, name: id, avatar: "", ...data.users[id] });
         let candidates = new Map();
         const skipped = [];
+        for (const direction of new Set([first, second])) {
+          const snapshot = data.relationships[home.id][direction];
+          if (snapshot.missingIdentifiers)
+            skipped.push(
+              skippedRelationship(
+                user(home.id),
+                direction,
+                snapshot.missingIdentifiers,
+              ),
+            );
+        }
         for (const id of initial.members) {
           const snapshot = data.relationships[id]?.[second];
           if (!snapshot) return;
           snapshots.push(snapshot);
           if (snapshot.skipped) {
-            skipped.push({ id, direction: second });
+            skipped.push(skippedRelationship(user(id), second));
             continue;
           }
+          if (snapshot.missingIdentifiers)
+            skipped.push(
+              skippedRelationship(
+                user(id),
+                second,
+                snapshot.missingIdentifiers,
+              ),
+            );
           candidates = addContributions(
             candidates,
             snapshot.members.map(user),

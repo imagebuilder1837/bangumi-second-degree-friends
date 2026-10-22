@@ -1,4 +1,5 @@
 import { addContributions, rankCandidates } from "./candidates.mjs";
+import { skippedRelationship } from "./issues.mjs";
 
 const databaseName = "second-degree-friends";
 const storeName = "relationships";
@@ -31,6 +32,10 @@ function validated(value) {
       if (
         !record(snapshot) ||
         !timestamp(snapshot.fetchedAt) ||
+        (snapshot.missingIdentifiers !== undefined &&
+          (snapshot.skipped === true ||
+            !Number.isSafeInteger(snapshot.missingIdentifiers) ||
+            snapshot.missingIdentifiers <= 0)) ||
         !(snapshot.skipped === true
           ? snapshot.members === undefined
           : Array.isArray(snapshot.members) &&
@@ -43,6 +48,9 @@ function validated(value) {
           ? { skipped: true }
           : { members: [...new Set(snapshot.members)] }),
         fetchedAt: snapshot.fetchedAt,
+        ...(snapshot.missingIdentifiers
+          ? { missingIdentifiers: snapshot.missingIdentifiers }
+          : {}),
       };
     }
   }
@@ -51,7 +59,7 @@ function validated(value) {
       !record(user) ||
       typeof user.name !== "string" ||
       typeof user.avatar !== "string" ||
-      !/^https?:\/\//.test(user.avatar) ||
+      (user.avatar !== "" && !/^https?:\/\//.test(user.avatar)) ||
       !timestamp(user.fetchedAt)
     )
       continue;
@@ -155,14 +163,29 @@ export function relationshipCache(window, home) {
       const user = (id) => ({ id, name: id, avatar: "", ...data.users[id] });
       let candidates = new Map();
       const skipped = [];
+      for (const direction of new Set([first, second])) {
+        const snapshot = data.relationships[home.id][direction];
+        if (snapshot.missingIdentifiers)
+          skipped.push(
+            skippedRelationship(
+              user(home.id),
+              direction,
+              snapshot.missingIdentifiers,
+            ),
+          );
+      }
       for (const id of initial.members) {
         const snapshot = data.relationships[id]?.[second];
         if (!snapshot) return;
         snapshots.push(snapshot);
         if (snapshot.skipped) {
-          skipped.push({ id, direction: second });
+          skipped.push(skippedRelationship(user(id), second));
           continue;
         }
+        if (snapshot.missingIdentifiers)
+          skipped.push(
+            skippedRelationship(user(id), second, snapshot.missingIdentifiers),
+          );
         candidates = addContributions(
           candidates,
           snapshot.members.map(user),

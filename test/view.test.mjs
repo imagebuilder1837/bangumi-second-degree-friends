@@ -30,7 +30,9 @@ test("cache loading and missing cache show status only in the header", async (t)
   const results = document.querySelector(".sdf-results");
   assert.equal(results.textContent, "");
   await waitFor(() =>
-    document.querySelector('[role="status"]').textContent.startsWith("缓存不足"),
+    document
+      .querySelector('[role="status"]')
+      .textContent.startsWith("缓存不足"),
   );
   assert.equal(results.textContent, "");
 });
