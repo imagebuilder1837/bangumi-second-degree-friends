@@ -151,10 +151,10 @@
 
 ## 8. 浏览器本地存储与写入协调
 
-以下是浏览器标准与厂商资料，不是 Bangumi 服务器行为；未进行实际容量或多标签页实验。
+以下为 IndexedDB 标准与浏览器厂商资料，不是 Bangumi 服务器行为；未进行真实浏览器、多标签页、容量或断电恢复实测。
 
-- **写入失败语义**：[HTML Standard 的 Storage 算法](https://html.spec.whatwg.org/multipage/webstorage.html#the-storage-interface)在不能存储时先抛 `QuotaExceededError`，之后才更新 map。因此单次 `setItem` 失败不删除原值，但这不是多 key 事务；先自行 `removeItem` 不受此保护。访问 localStorage 本身还可能抛 `SecurityError`。
-- **容量与共享**：[Storage Standard](https://storage.spec.whatwg.org/#storage-endpoints)列出 localStorage 标称配额 `5 × 2^20` 字节；[MDN 可用性说明](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API/Using_the_Web_Storage_API#testing_for_availability)同时指出禁用存储、隐私模式零配额等情况，不能承诺所有环境都可写满。同一存储分区内的同源原站与组件共享 localStorage，不按 pathname 或脚本前缀隔离，见 [HTML Standard](https://html.spec.whatwg.org/multipage/webstorage.html#cross-directory-attacks)。
-- **估计值边界**：[`navigator.storage.estimate()`](https://developer.mozilla.org/en-US/docs/Web/API/StorageManager/estimate)返回 origin 存储近似 usage/quota，不是 localStorage 专用剩余额度，不能据差值保证某次写入成功。
-- **多标签页协调**：[HTML Standard](https://html.spec.whatwg.org/multipage/webstorage.html#introduction)告诫不要假设 localStorage 存在读改写锁。[Web Locks](https://w3c.github.io/web-locks/#api)提供同名 exclusive 锁，回调的 Promise 完成后释放。**适用性推断**：参与者共同使用同名锁，可串行执行读、合并、写入；未使用该锁的其他脚本不受约束，锁也不消除容量失败。
-- **锁的环境边界**：Web Locks 要求安全上下文，协调范围是共享 storage bucket 的 agents，不跨 Bangumi 三个主机、隔离分区或浏览器会话。[兼容数据](https://github.com/mdn/browser-compat-data/blob/main/api/LockManager.json)列出 Chrome 69、Firefox 96、Safari 15.4 起支持；[WebKit 发布说明](https://webkit.org/blog/12445/new-webkit-features-in-safari-15-4/)确认 Safari 15.4 支持。实际 WebView、隐私策略及能力暴露仍须运行时检测。
+- **标准：事务原子性**：[W3C IndexedDB §2.7.1](https://www.w3.org/TR/IndexedDB/#transaction-lifecycle)规定提交时全部更改原子写入，发生磁盘写入等错误则不写入任何更改；[中止算法 §5.5](https://www.w3.org/TR/IndexedDB/#abort-transaction)撤销该事务对数据库的全部更改。单个请求成功不等于事务提交成功；事务成功提交后才触发 `complete`。
+- **标准：并发与排队**：同一数据库可由多个页面／worker 同时使用（[W3C IndexedDB 示例说明](https://www.w3.org/TR/IndexedDB/#handling-versionchange)）；[§2.7.2](https://www.w3.org/TR/IndexedDB/#transaction-scheduling)要求 `readwrite` 事务等待更早创建、作用域重叠且未结束的事务。作用域按 object store 判断，不按记录 key；重叠的只读事务可以并行。此为数据库事务调度保证，不是任意异步读写流程的全局锁。
+- **标准及解释：隔离范围**：[W3C IndexedDB §2.1](https://www.w3.org/TR/IndexedDB/#database-construct)以 storage key 划分数据库集合，数据库名只在该 key 内标识数据库；[Storage Standard §4.2](https://storage.spec.whatwg.org/#storage-keys)以 origin 定义 key，并注明存储分区模型可能扩展。因此同名数据库不跨不同主机共享，也不能据同源推定不同浏览器配置或隔离分区必然共享；禁用存储时获取 key 可失败。
+- **标准／厂商资料：容量与保留边界**：[Storage Standard §6–7](https://storage.spec.whatwg.org/#usage-and-quota)将用量与配额定义为实现相关估计，存储压力下可清理默认的 `best-effort` 存储；[WebKit 存储政策](https://webkit.org/blog/14403/updates-to-storage-policy/)确认 IndexedDB 受配额与清理政策约束，配额上限不保证可实际写满，写入可能报 `QuotaExceededError`。获准的 `persistent` 模式限制浏览器自动清理，不阻止用户清除；[IndexedDB durability hint](https://www.w3.org/TR/IndexedDB/#transaction-durability-hint)还区分默认、宽松与严格落盘语义。因此事务完成不承诺固定容量、永久保留或断电后必定恢复。
+- **标准：版本升级阻塞**：[W3C IndexedDB 打开连接算法 §5.1](https://www.w3.org/TR/IndexedDB/#open-a-database-connection)要求升级前通知旧连接 `versionchange`，等待这些连接关闭；通知后仍有未关闭连接时触发 `blocked`。此事件表示升级等待其他连接，不是一般写事务的排队通知。

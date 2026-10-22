@@ -3,8 +3,6 @@
 本仓库的工单与待实施规格使用 GitHub Issues，通过 `gh` CLI 操作。
 在仓库目录内执行命令，由 git remote 推断目标仓库。
 
-Issue 默认只读；仅在用户明确要求或调用相关 skill 时修改。
-
 ## 常用操作
 
 - 读取：`gh issue view <number> --json number,title,body,labels,comments`
