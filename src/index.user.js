@@ -14,7 +14,7 @@
 // @updateURL    https://raw.githubusercontent.com/imagebuilder1837/bangumi-second-degree-friends/refs/heads/main/src/index.user.js
 // ==/UserScript==
 
-// Generated from src/main.mjs and its src/*.mjs imports. Do not edit; run npm run build.
+// Generated from src/main.mjs and its imports, including vendor modules. Do not edit; run npm run build.
 (function () {
   "use strict";
 
@@ -1024,147 +1024,389 @@
     });
   }
 
-  const databaseName = "second-degree-friends";
-  const storeName = "relationships";
-  const unavailableMessage =
-    "IndexedDB 不可用或访问被拒绝，请检查浏览器支持和站点存储权限后重试";
-  const dictionary = () => Object.create(null);
-  const empty = () => ({
-    version: 1,
-    relationships: dictionary(),
-    users: dictionary(),
-  });
-  const record = (value) =>
-    value && typeof value === "object" && !Array.isArray(value);
-  const timestamp = (value) =>
-    Number.isFinite(value) && value >= 0 && value <= 8640000000000000;
-  const identifier = (value) => typeof value === "string" && value.length > 0;
-
-  function validated(value) {
-    const data = empty();
-    if (
-      value?.version !== 1 ||
-      !record(value.relationships) ||
-      !record(value.users)
-    )
-      return data;
-    for (const [id, directions] of Object.entries(value.relationships)) {
-      if (!identifier(id) || !record(directions)) continue;
-      for (const direction of ["friends", "rev_friends"]) {
-        const snapshot = directions[direction];
-        if (
-          !record(snapshot) ||
-          !timestamp(snapshot.fetchedAt) ||
-          (snapshot.missingIdentifiers !== undefined &&
-            (snapshot.skipped === true ||
-              !Number.isSafeInteger(snapshot.missingIdentifiers) ||
-              snapshot.missingIdentifiers <= 0)) ||
-          !(snapshot.skipped === true
-            ? snapshot.members === undefined
-            : Array.isArray(snapshot.members) &&
-              snapshot.members.every(identifier))
-        )
-          continue;
-        data.relationships[id] ??= dictionary();
-        data.relationships[id][direction] = {
-          ...(snapshot.skipped === true
-            ? { skipped: true }
-            : { members: [...new Set(snapshot.members)] }),
-          fetchedAt: snapshot.fetchedAt,
-          ...(snapshot.missingIdentifiers
-            ? { missingIdentifiers: snapshot.missingIdentifiers }
-            : {}),
-        };
-      }
+  class RelationshipStoreError extends Error {
+    constructor(code, message, cause) {
+      super(message, { cause });
+      this.name = cause?.name || "RelationshipStoreError";
+      this.code = code;
     }
-    for (const [id, user] of Object.entries(value.users)) {
-      if (
-        !record(user) ||
-        typeof user.name !== "string" ||
-        typeof user.avatar !== "string" ||
-        (user.avatar !== "" && !/^https?:\/\//.test(user.avatar)) ||
-        !timestamp(user.fetchedAt)
-      )
-        continue;
-      data.users[id] = {
-        name: user.name,
-        avatar: user.avatar,
-        fetchedAt: user.fetchedAt,
-      };
-    }
-    return data;
   }
 
-  async function transact(window, mode, operation, signal) {
+  const record = (value) =>
+    Object.prototype.toString.call(value) === "[object Object]";
+  const identifier = (value) => typeof value === "string" && value.length > 0;
+  const direction = (value) => ["friends", "rev_friends"].includes(value);
+  const timestamp = (value) =>
+    Number.isFinite(value) && value >= 0 && value <= 8640000000000000;
+  const fields = (value, allowed) =>
+    record(value) && Object.keys(value).every((key) => allowed.includes(key));
+  const missingIssue = (issue) =>
+    fields(issue, ["code", "count"]) &&
+    issue.code === "missing-identifiers" &&
+    Number.isSafeInteger(issue.count) &&
+    issue.count > 0;
+  const unavailableIssue = (issue) =>
+    fields(issue, ["code"]) &&
+    issue.code === "deleted-display-name-page-unavailable";
+
+  function snapshot(value) {
+    if (
+      !fields(value, ["status", "members", "fetchedAt", "issue"]) ||
+      !timestamp(value.fetchedAt)
+    )
+      return false;
+    if (value.status === "available")
+      return (
+        Array.isArray(value.members) &&
+        value.members.every(identifier) &&
+        (value.issue === undefined || missingIssue(value.issue))
+      );
+    return (
+      value.status === "unavailable" &&
+      value.members === undefined &&
+      unavailableIssue(value.issue)
+    );
+  }
+
+  function avatar(value) {
+    if (value === "") return true;
+    try {
+      const url = new URL(value);
+      return ["http:", "https:"].includes(url.protocol);
+    } catch {
+      return false;
+    }
+  }
+
+  function user(value) {
+    return (
+      fields(value, ["name", "avatar", "fetchedAt"]) &&
+      typeof value.name === "string" &&
+      typeof value.avatar === "string" &&
+      avatar(value.avatar) &&
+      timestamp(value.fetchedAt)
+    );
+  }
+
+  function storedValue(entry, name) {
+    if (entry === undefined) return undefined;
+    if (!record(entry) || !Number.isSafeInteger(entry.version))
+      throw new RelationshipStoreError(
+        "corrupt-data",
+        "Damaged relationship store record",
+      );
+    if (entry.version !== 1)
+      throw new RelationshipStoreError(
+        "incompatible-version",
+        "Unsupported relationship record version",
+      );
+    if (
+      !fields(entry, ["version", "value"]) ||
+      !(name === "relationships" ? snapshot(entry.value) : user(entry.value))
+    )
+      throw new RelationshipStoreError(
+        "corrupt-data",
+        "Damaged relationship store record",
+      );
+    return entry.value;
+  }
+
+  function requireInput(condition) {
+    if (!condition)
+      throw new RelationshipStoreError(
+        "invalid-input",
+        "Invalid relationship store input",
+      );
+  }
+
+  function queryEntries(query) {
+    requireInput(fields(query, ["relationships", "users"]));
+    const { relationships = [], users = [] } = query;
+    requireInput(Array.isArray(relationships) && Array.isArray(users));
+    requireInput(
+      relationships.every(
+        (key) =>
+          Array.isArray(key) &&
+          key.length === 2 &&
+          identifier(key[0]) &&
+          direction(key[1]),
+      ) && users.every(identifier),
+    );
+    return [
+      ...relationships.map(([id, kind]) => ({
+        name: "relationships",
+        key: [id, kind],
+      })),
+      ...users.map((id) => ({ name: "users", key: id })),
+    ];
+  }
+
+  function batchEntries(batch) {
+    requireInput(fields(batch, ["relationships", "users"]));
+    const { relationships = {}, users = {} } = batch;
+    requireInput(record(relationships) && record(users));
+    const entries = [];
+    for (const [id, directions] of Object.entries(relationships)) {
+      requireInput(identifier(id) && record(directions));
+      for (const [kind, value] of Object.entries(directions)) {
+        requireInput(direction(kind) && snapshot(value));
+        entries.push({
+          name: "relationships",
+          key: [id, kind],
+          value: {
+            ...value,
+            ...(value.members ? { members: [...new Set(value.members)] } : {}),
+            ...(value.issue ? { issue: { ...value.issue } } : {}),
+          },
+        });
+      }
+    }
+    for (const [id, value] of Object.entries(users)) {
+      requireInput(identifier(id) && user(value));
+      entries.push({ name: "users", key: id, value: { ...value } });
+    }
+    return entries;
+  }
+
+  const databaseName = "bangumi-relationship-store";
+  const stores = ["relationships", "users"];
+  const dictionary = () => Object.create(null);
+
+  function storageError(error) {
+    if (error instanceof RelationshipStoreError) return error;
+    const code =
+      error?.name === "VersionError"
+        ? "incompatible-version"
+        : error?.name === "QuotaExceededError"
+          ? "quota-exceeded"
+          : ["SecurityError", "InvalidStateError", "NotAllowedError"].includes(
+                error?.name,
+              )
+            ? "unavailable"
+            : "storage-error";
+    return new RelationshipStoreError(
+      code,
+      error?.message || "Relationship storage failed",
+      error,
+    );
+  }
+
+  function transact(indexedDB, mode, operation, signal) {
     signal?.throwIfAborted();
-    if (typeof window.indexedDB?.open !== "function")
-      throw new Error(unavailableMessage);
     return new Promise((resolve, reject) => {
-      const opening = window.indexedDB.open(databaseName, 1);
-      let blocked = false;
-      opening.onupgradeneeded = () => {
-        opening.result.createObjectStore(storeName);
+      let opening;
+      let abandoned = false;
+      const openingAbort = () => {
+        abandoned = true;
+        signal?.removeEventListener("abort", openingAbort);
+        reject(signal.reason);
       };
-      opening.onerror = () => reject(opening.error);
-      opening.onblocked = () => {
-        blocked = true;
-        reject(
-          new Error("IndexedDB 升级被其他标签页阻塞，请关闭其他标签页后重试"),
+      const rejectOpening = (error) => {
+        abandoned = true;
+        signal?.removeEventListener("abort", openingAbort);
+        reject(storageError(error));
+      };
+      try {
+        if (typeof indexedDB?.open !== "function")
+          throw new RelationshipStoreError(
+            "unavailable",
+            "IndexedDB is unavailable",
+          );
+        opening = indexedDB.open(databaseName, 1);
+      } catch (error) {
+        rejectOpening(error);
+        return;
+      }
+      signal?.addEventListener("abort", openingAbort, { once: true });
+      opening.onupgradeneeded = (event) => {
+        if (abandoned || signal?.aborted || event.oldVersion !== 0) {
+          opening.transaction.abort();
+          return;
+        }
+        for (const name of stores) opening.result.createObjectStore(name);
+      };
+      opening.onblocked = () =>
+        rejectOpening(
+          new RelationshipStoreError(
+            "blocked",
+            "Database upgrade is blocked by another connection",
+          ),
         );
-      };
+      opening.onerror = () => rejectOpening(opening.error);
       opening.onsuccess = () => {
+        signal?.removeEventListener("abort", openingAbort);
         const database = opening.result;
         database.onversionchange = () => database.close();
-        if (blocked || signal?.aborted) {
+        if (abandoned || signal?.aborted) {
           database.close();
-          reject(signal?.reason);
+          if (signal?.aborted) reject(signal.reason);
           return;
         }
         let transaction;
         try {
-          transaction = database.transaction(storeName, mode);
+          if (stores.some((name) => !database.objectStoreNames.contains(name)))
+            throw new RelationshipStoreError(
+              "corrupt-data",
+              "Missing relationship object store",
+            );
+          transaction = database.transaction(stores, mode);
         } catch (error) {
           database.close();
-          reject(error);
+          reject(storageError(error));
           return;
         }
         let result;
         let failure;
-        const abort = () => transaction.abort();
+        let aborting = false;
+        const fail = (error) => {
+          if (aborting) return;
+          aborting = true;
+          failure = error;
+          transaction.abort();
+        };
+        const abort = () => fail(signal.reason);
         const close = () => {
           signal?.removeEventListener("abort", abort);
           database.close();
-        };
-        signal?.addEventListener("abort", abort, { once: true });
-        transaction.onabort = () => {
-          close();
-          reject(
-            signal?.aborted ? signal.reason : (failure ?? transaction.error),
-          );
         };
         transaction.oncomplete = () => {
           close();
           resolve(result);
         };
-        const store = transaction.objectStore(storeName);
-        const reading = store.get("snapshots");
-        reading.onsuccess = () => {
-          try {
-            signal?.throwIfAborted();
-            result = operation(store, validated(reading.result));
-          } catch (error) {
-            failure = error;
-            transaction.abort();
-          }
+        transaction.onabort = () => {
+          close();
+          reject(
+            signal?.aborted
+              ? signal.reason
+              : storageError(failure ?? transaction.error),
+          );
         };
+        signal?.addEventListener("abort", abort, { once: true });
+        try {
+          signal?.throwIfAborted();
+          for (const name of stores) {
+            const store = transaction.objectStore(name);
+            if (
+              store.keyPath !== null ||
+              store.autoIncrement ||
+              store.indexNames.length
+            )
+              throw new RelationshipStoreError(
+                "corrupt-data",
+                "Unexpected relationship object store layout",
+              );
+          }
+          result = operation(transaction, fail);
+        } catch (error) {
+          fail(error);
+        }
       };
     });
   }
 
+  /**
+   * @typedef {"friends" | "rev_friends"} Direction
+   * @typedef {{code: "missing-identifiers", count: number}} MissingIdentifiers
+   * @typedef {{status: "available", members: string[], fetchedAt: number, issue?: MissingIdentifiers} |
+   *   {status: "unavailable", fetchedAt: number, issue: {code: "deleted-display-name-page-unavailable"}}} Snapshot
+   * @typedef {{name: string, avatar: string, fetchedAt: number}} User
+   * @typedef {{relationships?: [string, Direction][], users?: string[]}} Query
+   * @typedef {{relationships?: Record<string, Partial<Record<Direction, Snapshot>>>, users?: Record<string, User>}} Batch
+   * @typedef {{relationships: Record<string, Partial<Record<Direction, Snapshot>>>, users: Record<string, User>}} ReadResult
+   * @typedef {{signal?: AbortSignal}} Options
+   */
+
+  /**
+   * Create a same-origin store. Each call opens and closes its own connection.
+   * @param {{indexedDB?: IDBFactory}} dependencies
+   */
+  function createRelationshipStore({ indexedDB }) {
+    return {
+      /**
+       * Read only requested keys in one transaction; absent keys are omitted.
+       * @param {Query} query
+       * @param {Options} [options]
+       * @returns {Promise<ReadResult>}
+       */
+      async read(query, { signal } = {}) {
+        const entries = queryEntries(query);
+        return transact(
+          indexedDB,
+          "readonly",
+          (transaction, fail) => {
+            const result = { relationships: dictionary(), users: dictionary() };
+            for (const { name, key } of entries) {
+              const request = transaction.objectStore(name).get(key);
+              request.onsuccess = () => {
+                try {
+                  const value = storedValue(request.result, name);
+                  if (value === undefined) return;
+                  if (name === "relationships") {
+                    const [id, direction] = key;
+                    result.relationships[id] ??= dictionary();
+                    result.relationships[id][direction] = value;
+                  } else result.users[key] = value;
+                } catch (error) {
+                  fail(error);
+                }
+              };
+            }
+            return result;
+          },
+          signal,
+        );
+      },
+      /**
+       * Validate and detach input, then atomically merge by observation time.
+       * Resolve only on transaction completion; reject with the signal reason
+       * on cancellation, otherwise a RelationshipStoreError with a stable code.
+       * @param {Batch} batch
+       * @param {Options} [options]
+       * @returns {Promise<void>}
+       */
+      async commit(batch, { signal } = {}) {
+        const entries = batchEntries(batch);
+        return transact(
+          indexedDB,
+          "readwrite",
+          (transaction, fail) => {
+            const merge = (name, key, value) => {
+              const store = transaction.objectStore(name);
+              const request = store.get(key);
+              request.onsuccess = () => {
+                try {
+                  const previous = storedValue(request.result, name);
+                  if (!previous || value.fetchedAt >= previous.fetchedAt)
+                    store.put({ version: 1, value }, key);
+                } catch (error) {
+                  fail(error);
+                }
+              };
+            };
+            for (const { name, key, value } of entries) merge(name, key, value);
+          },
+          signal,
+        );
+      },
+    };
+  }
+
+  const unavailableMessage =
+    "IndexedDB 不可用或访问被拒绝，请检查浏览器支持和站点存储权限后重试";
+
   function cacheFailure(error) {
-    if (error?.name === "QuotaExceededError")
-      return "存储容量不足，请检查浏览器存储容量后重试";
     if (
+      error?.code === "quota-exceeded" ||
+      error?.name === "QuotaExceededError"
+    )
+      return "存储容量不足，请检查浏览器存储容量后重试";
+    if (error?.code === "blocked")
+      return "IndexedDB 升级被其他标签页阻塞，请关闭其他标签页后重试";
+    if (error?.code === "incompatible-version")
+      return "关系缓存版本不兼容，请更新组件后重试";
+    if (error?.code === "corrupt-data") return "关系缓存数据损坏，原数据已保留";
+    if (
+      error?.code === "unavailable" ||
       ["SecurityError", "InvalidStateError", "NotAllowedError"].includes(
         error?.name,
       )
@@ -1173,21 +1415,86 @@
     return error?.message || unavailableMessage;
   }
 
+  // Translate the component's accepted skips at the storage seam; the public
+  // protocol records observations, not whether a two-hop scan may continue.
+  function observation(snapshot) {
+    if (snapshot.skipped)
+      return {
+        status: "unavailable",
+        fetchedAt: snapshot.fetchedAt,
+        issue: { code: "deleted-display-name-page-unavailable" },
+      };
+    return {
+      status: "available",
+      members: snapshot.members,
+      fetchedAt: snapshot.fetchedAt,
+      ...(snapshot.missingIdentifiers
+        ? {
+            issue: {
+              code: "missing-identifiers",
+              count: snapshot.missingIdentifiers,
+            },
+          }
+        : {}),
+    };
+  }
+
+  function componentSnapshot(snapshot) {
+    return {
+      ...(snapshot.status === "unavailable"
+        ? { skipped: true }
+        : { members: snapshot.members }),
+      fetchedAt: snapshot.fetchedAt,
+      ...(snapshot.issue?.code === "missing-identifiers"
+        ? { missingIdentifiers: snapshot.issue.count }
+        : {}),
+    };
+  }
+
   function relationshipCache(window, home) {
+    // Resolve the browser dependency inside async operations: denied storage
+    // must not prevent mounting the component or running a live scan.
+    const store = () =>
+      createRelationshipStore({ indexedDB: window.indexedDB });
     return {
       async lookup(mode) {
-        const data = await transact(window, "readonly", (_, data) => data);
+        const database = store();
         const [first, second] = mode.split("/");
-        const initial = data.relationships[home.id]?.[first];
-        const excluded = data.relationships[home.id]?.[second];
-        if (!initial || !excluded || initial.skipped || excluded.skipped)
+        const root = await database.read({
+          relationships: [...new Set([first, second])].map((direction) => [
+            home.id,
+            direction,
+          ]),
+        });
+        const initial = root.relationships[home.id]?.[first];
+        const excluded = root.relationships[home.id]?.[second];
+        if (
+          !initial ||
+          !excluded ||
+          initial.status === "unavailable" ||
+          excluded.status === "unavailable"
+        )
           return;
+        const related = await database.read({
+          relationships: initial.members.map((id) => [id, second]),
+        });
+        // Keep observations from each read separate: home may itself appear in
+        // its first-hop list, and a concurrent writer may update it in between.
         const snapshots = [initial, excluded];
+        for (const id of initial.members) {
+          const snapshot = related.relationships[id]?.[second];
+          if (!snapshot) return;
+          snapshots.push(snapshot);
+        }
+        const userIds = new Set([home.id, ...initial.members]);
+        for (const snapshot of snapshots)
+          for (const id of snapshot.members ?? []) userIds.add(id);
+        const profiles = await database.read({ users: [...userIds] });
         const excludedIds = new Set([home.id, ...excluded.members]);
         const users = new Map();
         const user = (id) => {
           if (!users.has(id))
-            users.set(id, { id, name: id, avatar: "", ...data.users[id] });
+            users.set(id, { id, name: id, avatar: "", ...profiles.users[id] });
           return users.get(id);
         };
         function* members(snapshot) {
@@ -1197,7 +1504,9 @@
         let candidates = new Map();
         const skipped = [];
         for (const direction of new Set([first, second])) {
-          const snapshot = data.relationships[home.id][direction];
+          const snapshot = componentSnapshot(
+            root.relationships[home.id][direction],
+          );
           if (snapshot.missingIdentifiers)
             skipped.push(
               skippedRelationship(
@@ -1208,9 +1517,7 @@
             );
         }
         for (const id of initial.members) {
-          const snapshot = data.relationships[id]?.[second];
-          if (!snapshot) return;
-          snapshots.push(snapshot);
+          const snapshot = componentSnapshot(related.relationships[id][second]);
           if (snapshot.skipped) {
             skipped.push(skippedRelationship(user(id), second));
             continue;
@@ -1234,37 +1541,26 @@
           results: rankCandidates(candidates),
           complete: true,
           skipped,
-          earliest: Math.min(
-            ...snapshots.map((snapshot) => snapshot.fetchedAt),
+          earliest: snapshots.reduce(
+            (time, snapshot) => Math.min(time, snapshot.fetchedAt),
+            Infinity,
           ),
-          latest: Math.max(...snapshots.map((snapshot) => snapshot.fetchedAt)),
+          latest: snapshots.reduce(
+            (time, snapshot) => Math.max(time, snapshot.fetchedAt),
+            -Infinity,
+          ),
         };
       },
       async commit(staged, signal) {
-        await transact(
-          window,
-          "readwrite",
-          (store, merged) => {
-            for (const [id, directions] of Object.entries(
-              staged.relationships,
-            )) {
-              merged.relationships[id] ??= dictionary();
-              for (const [direction, snapshot] of Object.entries(directions)) {
-                const previous = merged.relationships[id][direction];
-                if (!previous || snapshot.fetchedAt >= previous.fetchedAt)
-                  merged.relationships[id][direction] = snapshot;
-              }
-            }
-            for (const [id, user] of Object.entries(staged.users)) {
-              if (
-                !merged.users[id] ||
-                user.fetchedAt >= merged.users[id].fetchedAt
-              )
-                merged.users[id] = user;
-            }
-            store.put(merged, "snapshots");
-          },
-          signal,
+        const relationships = Object.create(null);
+        for (const [id, directions] of Object.entries(staged.relationships)) {
+          relationships[id] = Object.create(null);
+          for (const [direction, snapshot] of Object.entries(directions))
+            relationships[id][direction] = observation(snapshot);
+        }
+        await store().commit(
+          { relationships, users: staged.users },
+          { signal },
         );
       },
     };

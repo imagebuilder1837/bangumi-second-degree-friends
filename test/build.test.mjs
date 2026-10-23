@@ -29,7 +29,7 @@ test("build produces a repeatable installable script with leading metadata and t
   );
   assert.ok(
     artifact.includes(
-      "// ==/UserScript==\n\n// Generated from src/main.mjs and its src/*.mjs imports. Do not edit; run npm run build.\n",
+      "// ==/UserScript==\n\n// Generated from src/main.mjs and its imports, including vendor modules. Do not edit; run npm run build.\n",
     ),
   );
   assert.ok(!artifact.includes("{{VERSION}}"));

@@ -20,6 +20,17 @@ test("check accepts a formatted reproducible release and executes the tests", as
   assert.match(check.output, /public command test/);
 });
 
+test("check includes vendored module tests in the delivery gate", async (t) => {
+  const app = await ready(t);
+  await app.write(
+    "vendor/bangumi-relationship-store/test/gate.test.mjs",
+    'import test from "node:test";\n\ntest("vendored failure", () => {\n  throw new Error("module gate propagated");\n});\n',
+  );
+  const result = app.run("check");
+  assert.notEqual(result.status, 0, result.output);
+  assert.match(result.output, /module gate propagated/);
+});
+
 test("check rejects a stale artifact without rewriting it", async (t) => {
   const app = await ready(t);
   const artifact = await app.read("src/index.user.js");

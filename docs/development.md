@@ -5,14 +5,16 @@
 在仓库根目录执行：
 
 ```sh
+git submodule update --init --recursive
 npm ci
 # 修改源码后更新生成产物，再执行完整检查
 npm run build
 npm run check
 ```
 
-- 修改 `src/*.mjs` 或 `src/metadata.txt`，由构建生成并提交 `src/index.user.js`；不直接修改生成产物。版本来自 `package.json`，调整时同步锁文件并重新构建。
-- `npm run check` 是交付前的完整入口，包含格式、语法、发布一致性、产物可复现性与测试；发现产物过期只报错，不代为生成。只运行行为测试可用 `npm test`。
+- 修改源码、关系存储子模块或 `src/metadata.txt` 后，由构建生成并提交 `src/index.user.js`；不直接修改生成产物。版本来自 `package.json`，调整时同步锁文件并重新构建。
+- `vendor/bangumi-relationship-store` 是独立 Git submodule。其开发方式见 [模块开发指南](../vendor/bangumi-relationship-store/docs/development.md)；在子模块提交后更新父仓库 gitlink。发布父仓库前先确保子模块引用的提交已推送。构建将源码内联，不在浏览器运行时加载远端依赖。
+- `npm run check` 是交付前的完整入口，包含格式、语法、发布一致性、产物可复现性与测试；发现产物过期只报错，不代为生成。包含子模块检查；只运行全部行为测试可用 `npm test`。
 - 模块入口见 [模块导航](module-guide.md)，预期行为见 [行为规格](spec.md)。
 
 ## 浏览器验证边界

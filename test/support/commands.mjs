@@ -21,6 +21,11 @@ export async function project(t) {
   for (const file of ["src", "scripts", "package.json", "package-lock.json"]) {
     await cp(new URL(file, root), join(directory, file), { recursive: true });
   }
+  await cp(new URL("vendor", root), join(directory, "vendor"), {
+    recursive: true,
+    filter: (source) =>
+      ![".git", "node_modules"].includes(source.split("/").at(-1)),
+  });
   await symlink(
     new URL("node_modules", root).pathname,
     join(directory, "node_modules"),

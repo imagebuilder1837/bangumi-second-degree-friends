@@ -61,6 +61,11 @@ if (
 )
   throw new Error("Artifact is stale; run npm run build");
 console.log("Reproducible artifact passed");
+execFileSync(
+  process.execPath,
+  ["vendor/bangumi-relationship-store/scripts/check.mjs"],
+  { cwd: root, stdio: "inherit" },
+);
 const tests = (await readdir(resolve(root, "test")))
   .filter((file) => file.endsWith(".test.mjs"))
   .sort();

@@ -1,147 +1,20 @@
+import { createRelationshipStore } from "../vendor/bangumi-relationship-store/src/index.mjs";
 import { addContributions, rankCandidates } from "./candidates.mjs";
 import { skippedRelationship } from "./issues.mjs";
 
-const databaseName = "second-degree-friends";
-const storeName = "relationships";
 const unavailableMessage =
   "IndexedDB 不可用或访问被拒绝，请检查浏览器支持和站点存储权限后重试";
-const dictionary = () => Object.create(null);
-const empty = () => ({
-  version: 1,
-  relationships: dictionary(),
-  users: dictionary(),
-});
-const record = (value) =>
-  value && typeof value === "object" && !Array.isArray(value);
-const timestamp = (value) =>
-  Number.isFinite(value) && value >= 0 && value <= 8640000000000000;
-const identifier = (value) => typeof value === "string" && value.length > 0;
-
-function validated(value) {
-  const data = empty();
-  if (
-    value?.version !== 1 ||
-    !record(value.relationships) ||
-    !record(value.users)
-  )
-    return data;
-  for (const [id, directions] of Object.entries(value.relationships)) {
-    if (!identifier(id) || !record(directions)) continue;
-    for (const direction of ["friends", "rev_friends"]) {
-      const snapshot = directions[direction];
-      if (
-        !record(snapshot) ||
-        !timestamp(snapshot.fetchedAt) ||
-        (snapshot.missingIdentifiers !== undefined &&
-          (snapshot.skipped === true ||
-            !Number.isSafeInteger(snapshot.missingIdentifiers) ||
-            snapshot.missingIdentifiers <= 0)) ||
-        !(snapshot.skipped === true
-          ? snapshot.members === undefined
-          : Array.isArray(snapshot.members) &&
-            snapshot.members.every(identifier))
-      )
-        continue;
-      data.relationships[id] ??= dictionary();
-      data.relationships[id][direction] = {
-        ...(snapshot.skipped === true
-          ? { skipped: true }
-          : { members: [...new Set(snapshot.members)] }),
-        fetchedAt: snapshot.fetchedAt,
-        ...(snapshot.missingIdentifiers
-          ? { missingIdentifiers: snapshot.missingIdentifiers }
-          : {}),
-      };
-    }
-  }
-  for (const [id, user] of Object.entries(value.users)) {
-    if (
-      !record(user) ||
-      typeof user.name !== "string" ||
-      typeof user.avatar !== "string" ||
-      (user.avatar !== "" && !/^https?:\/\//.test(user.avatar)) ||
-      !timestamp(user.fetchedAt)
-    )
-      continue;
-    data.users[id] = {
-      name: user.name,
-      avatar: user.avatar,
-      fetchedAt: user.fetchedAt,
-    };
-  }
-  return data;
-}
-
-async function transact(window, mode, operation, signal) {
-  signal?.throwIfAborted();
-  if (typeof window.indexedDB?.open !== "function")
-    throw new Error(unavailableMessage);
-  return new Promise((resolve, reject) => {
-    const opening = window.indexedDB.open(databaseName, 1);
-    let blocked = false;
-    opening.onupgradeneeded = () => {
-      opening.result.createObjectStore(storeName);
-    };
-    opening.onerror = () => reject(opening.error);
-    opening.onblocked = () => {
-      blocked = true;
-      reject(
-        new Error("IndexedDB 升级被其他标签页阻塞，请关闭其他标签页后重试"),
-      );
-    };
-    opening.onsuccess = () => {
-      const database = opening.result;
-      database.onversionchange = () => database.close();
-      if (blocked || signal?.aborted) {
-        database.close();
-        reject(signal?.reason);
-        return;
-      }
-      let transaction;
-      try {
-        transaction = database.transaction(storeName, mode);
-      } catch (error) {
-        database.close();
-        reject(error);
-        return;
-      }
-      let result;
-      let failure;
-      const abort = () => transaction.abort();
-      const close = () => {
-        signal?.removeEventListener("abort", abort);
-        database.close();
-      };
-      signal?.addEventListener("abort", abort, { once: true });
-      transaction.onabort = () => {
-        close();
-        reject(
-          signal?.aborted ? signal.reason : (failure ?? transaction.error),
-        );
-      };
-      transaction.oncomplete = () => {
-        close();
-        resolve(result);
-      };
-      const store = transaction.objectStore(storeName);
-      const reading = store.get("snapshots");
-      reading.onsuccess = () => {
-        try {
-          signal?.throwIfAborted();
-          result = operation(store, validated(reading.result));
-        } catch (error) {
-          failure = error;
-          transaction.abort();
-        }
-      };
-    };
-  });
-}
 
 export function cacheFailure(error) {
-  if (error?.name === "QuotaExceededError")
+  if (error?.code === "quota-exceeded" || error?.name === "QuotaExceededError")
     return "存储容量不足，请检查浏览器存储容量后重试";
+  if (error?.code === "blocked")
+    return "IndexedDB 升级被其他标签页阻塞，请关闭其他标签页后重试";
+  if (error?.code === "incompatible-version")
+    return "关系缓存版本不兼容，请更新组件后重试";
+  if (error?.code === "corrupt-data") return "关系缓存数据损坏，原数据已保留";
   if (
+    error?.code === "unavailable" ||
     ["SecurityError", "InvalidStateError", "NotAllowedError"].includes(
       error?.name,
     )
@@ -150,20 +23,85 @@ export function cacheFailure(error) {
   return error?.message || unavailableMessage;
 }
 
+// Translate the component's accepted skips at the storage seam; the public
+// protocol records observations, not whether a two-hop scan may continue.
+function observation(snapshot) {
+  if (snapshot.skipped)
+    return {
+      status: "unavailable",
+      fetchedAt: snapshot.fetchedAt,
+      issue: { code: "deleted-display-name-page-unavailable" },
+    };
+  return {
+    status: "available",
+    members: snapshot.members,
+    fetchedAt: snapshot.fetchedAt,
+    ...(snapshot.missingIdentifiers
+      ? {
+          issue: {
+            code: "missing-identifiers",
+            count: snapshot.missingIdentifiers,
+          },
+        }
+      : {}),
+  };
+}
+
+function componentSnapshot(snapshot) {
+  return {
+    ...(snapshot.status === "unavailable"
+      ? { skipped: true }
+      : { members: snapshot.members }),
+    fetchedAt: snapshot.fetchedAt,
+    ...(snapshot.issue?.code === "missing-identifiers"
+      ? { missingIdentifiers: snapshot.issue.count }
+      : {}),
+  };
+}
+
 export function relationshipCache(window, home) {
+  // Resolve the browser dependency inside async operations: denied storage
+  // must not prevent mounting the component or running a live scan.
+  const store = () => createRelationshipStore({ indexedDB: window.indexedDB });
   return {
     async lookup(mode) {
-      const data = await transact(window, "readonly", (_, data) => data);
+      const database = store();
       const [first, second] = mode.split("/");
-      const initial = data.relationships[home.id]?.[first];
-      const excluded = data.relationships[home.id]?.[second];
-      if (!initial || !excluded || initial.skipped || excluded.skipped) return;
+      const root = await database.read({
+        relationships: [...new Set([first, second])].map((direction) => [
+          home.id,
+          direction,
+        ]),
+      });
+      const initial = root.relationships[home.id]?.[first];
+      const excluded = root.relationships[home.id]?.[second];
+      if (
+        !initial ||
+        !excluded ||
+        initial.status === "unavailable" ||
+        excluded.status === "unavailable"
+      )
+        return;
+      const related = await database.read({
+        relationships: initial.members.map((id) => [id, second]),
+      });
+      // Keep observations from each read separate: home may itself appear in
+      // its first-hop list, and a concurrent writer may update it in between.
       const snapshots = [initial, excluded];
+      for (const id of initial.members) {
+        const snapshot = related.relationships[id]?.[second];
+        if (!snapshot) return;
+        snapshots.push(snapshot);
+      }
+      const userIds = new Set([home.id, ...initial.members]);
+      for (const snapshot of snapshots)
+        for (const id of snapshot.members ?? []) userIds.add(id);
+      const profiles = await database.read({ users: [...userIds] });
       const excludedIds = new Set([home.id, ...excluded.members]);
       const users = new Map();
       const user = (id) => {
         if (!users.has(id))
-          users.set(id, { id, name: id, avatar: "", ...data.users[id] });
+          users.set(id, { id, name: id, avatar: "", ...profiles.users[id] });
         return users.get(id);
       };
       function* members(snapshot) {
@@ -173,7 +111,9 @@ export function relationshipCache(window, home) {
       let candidates = new Map();
       const skipped = [];
       for (const direction of new Set([first, second])) {
-        const snapshot = data.relationships[home.id][direction];
+        const snapshot = componentSnapshot(
+          root.relationships[home.id][direction],
+        );
         if (snapshot.missingIdentifiers)
           skipped.push(
             skippedRelationship(
@@ -184,9 +124,7 @@ export function relationshipCache(window, home) {
           );
       }
       for (const id of initial.members) {
-        const snapshot = data.relationships[id]?.[second];
-        if (!snapshot) return;
-        snapshots.push(snapshot);
+        const snapshot = componentSnapshot(related.relationships[id][second]);
         if (snapshot.skipped) {
           skipped.push(skippedRelationship(user(id), second));
           continue;
@@ -206,34 +144,24 @@ export function relationshipCache(window, home) {
         results: rankCandidates(candidates),
         complete: true,
         skipped,
-        earliest: Math.min(...snapshots.map((snapshot) => snapshot.fetchedAt)),
-        latest: Math.max(...snapshots.map((snapshot) => snapshot.fetchedAt)),
+        earliest: snapshots.reduce(
+          (time, snapshot) => Math.min(time, snapshot.fetchedAt),
+          Infinity,
+        ),
+        latest: snapshots.reduce(
+          (time, snapshot) => Math.max(time, snapshot.fetchedAt),
+          -Infinity,
+        ),
       };
     },
     async commit(staged, signal) {
-      await transact(
-        window,
-        "readwrite",
-        (store, merged) => {
-          for (const [id, directions] of Object.entries(staged.relationships)) {
-            merged.relationships[id] ??= dictionary();
-            for (const [direction, snapshot] of Object.entries(directions)) {
-              const previous = merged.relationships[id][direction];
-              if (!previous || snapshot.fetchedAt >= previous.fetchedAt)
-                merged.relationships[id][direction] = snapshot;
-            }
-          }
-          for (const [id, user] of Object.entries(staged.users)) {
-            if (
-              !merged.users[id] ||
-              user.fetchedAt >= merged.users[id].fetchedAt
-            )
-              merged.users[id] = user;
-          }
-          store.put(merged, "snapshots");
-        },
-        signal,
-      );
+      const relationships = Object.create(null);
+      for (const [id, directions] of Object.entries(staged.relationships)) {
+        relationships[id] = Object.create(null);
+        for (const [direction, snapshot] of Object.entries(directions))
+          relationships[id][direction] = observation(snapshot);
+      }
+      await store().commit({ relationships, users: staged.users }, { signal });
     },
   };
 }

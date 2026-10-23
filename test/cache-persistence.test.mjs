@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { IDBFactory } from "fake-indexeddb";
 import { relationshipCache } from "../src/cache.mjs";
+import { createRelationshipStore } from "../vendor/bangumi-relationship-store/src/index.mjs";
 import { interceptWrites } from "./support/storage.mjs";
 
 const home = { id: "alice" };
@@ -32,6 +33,40 @@ function staged(members, fetchedAt = 1) {
     ),
   };
 }
+
+test("the component consumes another consumer's protocol observations and publishes its own", async () => {
+  const window = environment();
+  const store = createRelationshipStore({ indexedDB: window.indexedDB });
+  await store.commit({
+    relationships: {
+      alice: {
+        friends: { status: "available", members: ["bob"], fetchedAt: 1 },
+      },
+      bob: {
+        friends: {
+          status: "available",
+          members: ["shared"],
+          fetchedAt: 1,
+          issue: { code: "missing-identifiers", count: 2 },
+        },
+      },
+    },
+  });
+  const cache = relationshipCache(window, home);
+  const result = await cache.lookup("friends/friends");
+  assert.deepEqual(
+    result.results.map((user) => user.id),
+    ["shared"],
+  );
+  assert.equal(result.skipped[0].missingIdentifiers, 2);
+  await cache.commit(staged(["published"], 2), signal());
+  const read = await store.read({ relationships: [["bob", "friends"]] });
+  assert.deepEqual(read.relationships.bob.friends, {
+    status: "available",
+    members: ["published"],
+    fetchedAt: 2,
+  });
+});
 
 test("overlapping cached relationships rebuild independent complete rankings and counted intermediates", async () => {
   const cache = relationshipCache(environment(), home);

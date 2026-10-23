@@ -43,10 +43,13 @@ export function button(document, text) {
 }
 
 export async function waitFor(predicate) {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  // Database request count is data-dependent. Bound real elapsed time, not
+  // event-loop turns (fake-indexeddb schedules each record asynchronously).
+  const deadline = performance.now() + 5000;
+  do {
     if (predicate()) return;
     await new Promise((resolve) => setImmediate(resolve));
-  }
+  } while (performance.now() < deadline);
   throw new Error("Component did not reach expected state");
 }
 

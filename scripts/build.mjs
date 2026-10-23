@@ -11,7 +11,7 @@ export async function generateArtifact(root) {
   try {
     const { output } = await bundle.generate({ format: "iife" });
     return await format(
-      `${metadata.trimEnd().replace("{{VERSION}}", manifest.version)}\n\n// Generated from src/main.mjs and its src/*.mjs imports. Do not edit; run npm run build.\n${output[0].code}`,
+      `${metadata.trimEnd().replace("{{VERSION}}", manifest.version)}\n\n// Generated from src/main.mjs and its imports, including vendor modules. Do not edit; run npm run build.\n${output[0].code}`,
       { parser: "babel" },
     );
   } finally {
