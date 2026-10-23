@@ -1049,6 +1049,13 @@
     fields(issue, ["code"]) &&
     issue.code === "deleted-display-name-page-unavailable";
 
+  function arrayOf(value, accepts) {
+    if (!Array.isArray(value)) return false;
+    // Iteration visits empty slots as undefined; Array#every skips them.
+    for (const item of value) if (!accepts(item)) return false;
+    return true;
+  }
+
   function snapshot(value) {
     if (
       !fields(value, ["status", "members", "fetchedAt", "issue"]) ||
@@ -1057,8 +1064,7 @@
       return false;
     if (value.status === "available")
       return (
-        Array.isArray(value.members) &&
-        value.members.every(identifier) &&
+        arrayOf(value.members, identifier) &&
         (value.issue === undefined || missingIssue(value.issue))
       );
     return (
@@ -1089,7 +1095,6 @@
   }
 
   function storedValue(entry, name) {
-    if (entry === undefined) return undefined;
     if (!record(entry) || !Number.isSafeInteger(entry.version))
       throw new RelationshipStoreError(
         "corrupt-data",
@@ -1122,15 +1127,15 @@
   function queryEntries(query) {
     requireInput(fields(query, ["relationships", "users"]));
     const { relationships = [], users = [] } = query;
-    requireInput(Array.isArray(relationships) && Array.isArray(users));
     requireInput(
-      relationships.every(
+      arrayOf(
+        relationships,
         (key) =>
           Array.isArray(key) &&
           key.length === 2 &&
           identifier(key[0]) &&
           direction(key[1]),
-      ) && users.every(identifier),
+      ) && arrayOf(users, identifier),
     );
     return [
       ...relationships.map(([id, kind]) => ({
@@ -1189,6 +1194,26 @@
       error?.message || "Relationship storage failed",
       error,
     );
+  }
+
+  // A get() result of undefined can mean either no key or an invalid stored
+  // value. Resolve that ambiguity in the same transaction before validating.
+  function readRecord(store, key, accept, fail) {
+    const request = store.get(key);
+    request.onsuccess = () => {
+      const finish = (exists) => {
+        try {
+          accept(exists ? storedValue(request.result, store.name) : undefined);
+        } catch (error) {
+          fail(error);
+        }
+      };
+      if (request.result !== undefined) finish(true);
+      else {
+        const existence = store.getKey(key);
+        existence.onsuccess = () => finish(existence.result !== undefined);
+      }
+    };
   }
 
   function transact(indexedDB, mode, operation, signal) {
@@ -1336,20 +1361,19 @@
           (transaction, fail) => {
             const result = { relationships: dictionary(), users: dictionary() };
             for (const { name, key } of entries) {
-              const request = transaction.objectStore(name).get(key);
-              request.onsuccess = () => {
-                try {
-                  const value = storedValue(request.result, name);
+              readRecord(
+                transaction.objectStore(name),
+                key,
+                (value) => {
                   if (value === undefined) return;
                   if (name === "relationships") {
                     const [id, direction] = key;
                     result.relationships[id] ??= dictionary();
                     result.relationships[id][direction] = value;
                   } else result.users[key] = value;
-                } catch (error) {
-                  fail(error);
-                }
-              };
+                },
+                fail,
+              );
             }
             return result;
           },
@@ -1372,16 +1396,15 @@
           (transaction, fail) => {
             const merge = (name, key, value) => {
               const store = transaction.objectStore(name);
-              const request = store.get(key);
-              request.onsuccess = () => {
-                try {
-                  const previous = storedValue(request.result, name);
+              readRecord(
+                store,
+                key,
+                (previous) => {
                   if (!previous || value.fetchedAt >= previous.fetchedAt)
                     store.put({ version: 1, value }, key);
-                } catch (error) {
-                  fail(error);
-                }
-              };
+                },
+                fail,
+              );
             };
             for (const { name, key, value } of entries) merge(name, key, value);
           },
