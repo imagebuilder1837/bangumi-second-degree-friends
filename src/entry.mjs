@@ -26,7 +26,7 @@ export function initialize(window) {
     const item = document.createElement("li");
     item.id = "second-degree-friends-entry";
     item.innerHTML =
-      '<span class="service" style="background-color:#b58a00;color:#fff">SecondDegreeFriends</span> <span class="tip"><a class="l" href="#">二度好友发现</a></span>';
+      '<span class="service" style="background-color:#d9a300;color:#fff">SecondDegreeFriends</span> <span class="tip"><a class="l" href="#">二度好友发现</a></span>';
     services.append(item);
     const cache = relationshipCache(window, home);
     mountView(
