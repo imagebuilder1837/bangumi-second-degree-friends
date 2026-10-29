@@ -10,6 +10,7 @@ import {
 } from "./support/component.mjs";
 import { sharedStorage, interceptWrites } from "./support/storage.mjs";
 import { clock } from "./support/clock.mjs";
+import { createRelationshipStore } from "../vendor/bangumi-relationship-store/src/index.mjs";
 
 const status = (app) =>
   app.document.querySelector('[role="status"]').textContent;
@@ -175,7 +176,7 @@ test("cache failures identify capacity or unavailability while retaining complet
     );
     await open(app);
     await start(app);
-    assert.match(status(app), /^完成.*缓存保存失败.*旧缓存保留/);
+    assert.match(status(app), /^完成.*缓存保存失败.*已停止后续保存/);
     assert.match(
       status(app),
       kind === "quota" ? /容量不足/ : kind === "blocked" ? /阻塞/ : /不可用/,
@@ -197,7 +198,7 @@ test("cache failures identify capacity or unavailability while retaining complet
   }
 });
 
-test("staging never replaces cached results after root failure, intermediate failure, stop, rate limiting or late responses", async (t) => {
+test("failed and late relationship reads do not fabricate complete cached rankings", async (t) => {
   for (const failure of ["root", "intermediate", "stop", "429"]) {
     const storage = sharedStorage();
     const seed = cachedComponent(t, storage, {
@@ -242,7 +243,17 @@ test("staging never replaces cached results after root failure, intermediate fai
     assert.equal(app.document.querySelectorAll("[data-medal]").length, 0);
     const refreshed = cachedComponent(t, storage, {});
     await open(refreshed);
-    assert.equal(rows(refreshed)[0].dataset.userId, "old");
+    if (failure === "root")
+      assert.equal(rows(refreshed)[0].dataset.userId, "old");
+    else {
+      // The new root can be saved independently, but carol has no observation.
+      const store = createRelationshipStore({ indexedDB: storage.indexedDB });
+      const data = await store.read({ relationships: [["carol", "friends"]] });
+      assert.equal(data.relationships.carol, undefined);
+      if (rows(refreshed).length)
+        assert.equal(rows(refreshed)[0].dataset.userId, "old");
+      else assert.match(status(refreshed), /缓存不足/);
+    }
     assert.equal(refreshed.requests.length, 0);
   }
 });

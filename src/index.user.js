@@ -331,17 +331,13 @@
     window,
     home,
     mode,
-    { update, signal, rateLimited },
+    { update, signal, rateLimited, observe = () => {} },
   ) {
     const [first, second] = mode.split("/");
     const homeUrl = (direction) => {
       const url = direction === "friends" ? home.friendsUrl : home.reverseUrl;
       if (!url) throw new Error("缺少主页关系列表链接");
       return url;
-    };
-    const staged = {
-      relationships: Object.create(null),
-      users: Object.create(null),
     };
     const skipped = [];
     const failures = [];
@@ -356,30 +352,37 @@
         url,
       );
       const direction = new URL(url).pathname.split("/").at(-1);
-      staged.relationships[id] ??= Object.create(null);
-      staged.relationships[id][direction] = {
+      const snapshot = {
         members: [...members.keys()],
         fetchedAt: window.Date.now(),
         ...(missingIdentifiers ? { missingIdentifiers } : {}),
       };
       if (missingIdentifiers)
         skipped.push(skippedRelationship(user, direction, missingIdentifiers));
-      staged.users[id] = {
+      const users = Object.create(null);
+      users[id] = {
         name: user.name,
         avatar: user.avatar,
         fetchedAt: window.Date.now(),
       };
-      for (const user of members.values())
-        staged.users[user.id] = {
+      for (const user of members.values()) {
+        users[user.id] = {
           name: user.name,
           avatar: user.avatar,
           fetchedAt: window.Date.now(),
         };
-      return members;
+      }
+      observe({
+        relationships: {
+          [id]: { [direction]: snapshot },
+        },
+        users,
+      });
+      return { members, missingIdentifiers };
     };
     const readHome = async (direction) => {
       try {
-        const members = await read(home, homeUrl(direction));
+        const { members } = await read(home, homeUrl(direction));
         update([], "", undefined, skipped, failures);
         return members;
       } catch (error) {
@@ -429,15 +432,14 @@
           home.friendsUrl,
         ).href;
         try {
-          const members = await read(intermediary, url);
+          const { members, missingIdentifiers } = await read(intermediary, url);
           candidates = addContributions(
             candidates,
             members.values(),
             intermediary,
             excludedIds,
           );
-          if (staged.relationships[intermediary.id][second].missingIdentifiers)
-            skippedIntermediates++;
+          if (missingIdentifiers) skippedIntermediates++;
           else succeeded++;
         } catch (error) {
           signal.throwIfAborted();
@@ -447,11 +449,14 @@
           ) {
             skipped.push(skippedRelationship(intermediary, second));
             skippedIntermediates++;
-            staged.relationships[intermediary.id] ??= Object.create(null);
-            staged.relationships[intermediary.id][second] = {
-              skipped: true,
-              fetchedAt: window.Date.now(),
-            };
+            observe({
+              relationships: {
+                [intermediary.id]: {
+                  [second]: { skipped: true, fetchedAt: window.Date.now() },
+                },
+              },
+              users: {},
+            });
           } else {
             failed++;
             failures.push({
@@ -467,7 +472,7 @@
     await Promise.all(
       Array.from({ length: Math.min(4, intermediates.length) }, worker),
     );
-    return { ...publish(), staged };
+    return publish();
   }
 
   function mountView(
@@ -744,6 +749,10 @@
     };
     const expanded = new Set();
     let visibleRanks = 50;
+    let hydrate;
+    let presentation = 0;
+    let paginationStatus;
+    let latestPresentation;
     const visibleContributors = new Map();
     const moreRanks = document.createElement("button");
     moreRanks.type = "button";
@@ -861,14 +870,51 @@
         list.after(moreRanks);
         moreRanks.onclick = () => {
           const from = visibleRanks;
-          visibleRanks += 50;
-          render(results, complete, {
-            from,
-            focusKey:
-              document.activeElement === moreRanks
-                ? `candidate:${results[from].id}`
-                : undefined,
-          });
+          const focused = document.activeElement === moreRanks;
+          const request = presentation;
+          const append = () => {
+            visibleRanks += 50;
+            if (dialog.hidden) {
+              pendingPresentation = latestPresentation;
+              return;
+            }
+            render(results, complete, {
+              from,
+              focusKey:
+                focused && document.activeElement === moreRanks
+                  ? `candidate:${results[from].id}`
+                  : undefined,
+            });
+          };
+          if (!hydrate) {
+            append();
+            return;
+          }
+          paginationStatus ??= [
+            status.textContent,
+            status.dataset.warning === "true",
+          ];
+          const [previousStatus, previousWarning] = paginationStatus;
+          moreRanks.disabled = true;
+          hydrate(results.slice(from, from + 50))
+            .then(
+              () => {
+                if (request !== presentation) return;
+                append();
+                setStatus(previousStatus, previousWarning);
+                paginationStatus = undefined;
+              },
+              (error) => {
+                if (request !== presentation) return;
+                setStatus(
+                  `资料读取失败：${error.message}；点击显示更多重试`,
+                  true,
+                );
+              },
+            )
+            .finally(() => {
+              if (request === presentation) moreRanks.disabled = false;
+            });
         };
       }
       if (!dialog.hidden && focusedKey) {
@@ -896,10 +942,15 @@
       showDetails(skipped, failures);
     };
     const presentResults = (results, complete = false, skipped, failures) => {
-      pendingPresentation = { results, complete, skipped, failures };
+      latestPresentation = { results, complete, skipped, failures };
+      pendingPresentation = latestPresentation;
       paintResults();
     };
     const resetResults = () => {
+      presentation++;
+      hydrate = undefined;
+      paginationStatus = undefined;
+      moreRanks.disabled = false;
       details.open = false;
       expanded.clear();
       visibleContributors.clear();
@@ -929,6 +980,7 @@
         return;
       }
       if (request !== cacheRequest) return;
+      hydrate = outcome?.hydrate;
       presentResults(
         outcome?.results ?? [],
         Boolean(outcome),
@@ -971,6 +1023,14 @@
       try {
         const outcome = await scan(current.mode, {
           signal: current.controller.signal,
+          saveFailed: (warning) => {
+            current.saveWarning = warning;
+            if (task === current && !current.controller.signal.aborted)
+              setStatus(
+                `${current.progress ? `扫描进度：${current.progress}；` : ""}${warning}`,
+                true,
+              );
+          },
           rateLimited: (until) => {
             cooldownUntil = until;
             current.rateLimited = true;
@@ -995,7 +1055,11 @@
             current.progress = progress;
             presentResults(results, false, skipped, failures);
             setProgress(counts);
-            if (counts) setStatus(`扫描进度：${progress}`, counts.failed > 0);
+            if (counts)
+              setStatus(
+                `扫描进度：${progress}${current.saveWarning ? `；${current.saveWarning}` : ""}`,
+                counts.failed > 0 || Boolean(current.saveWarning),
+              );
           },
         });
         presentResults(
@@ -1016,6 +1080,7 @@
             ? "已停止，结果未完成"
             : `读取失败，未完成：${error.message}`;
         if (current.progress) message += `；${current.progress}`;
+        if (current.saveWarning) message += `；${current.saveWarning}`;
         // Unknown totals must not keep looking like an active scan after stopping.
         if (!progressBar.hasAttribute("value")) progressBar.hidden = true;
         setStatus(message, true);
@@ -1399,7 +1464,7 @@
         );
       },
       /**
-       * Validate and detach input, then atomically merge by observation time.
+       * Validate and detach input, then atomically replace the requested records.
        * Resolve only on transaction completion; reject with the signal reason
        * on cancellation, otherwise a RelationshipStoreError with a stable code.
        * @param {Batch} batch
@@ -1411,20 +1476,11 @@
         return transact(
           indexedDB,
           "readwrite",
-          (transaction, fail) => {
-            const merge = (name, key, value) => {
-              const store = transaction.objectStore(name);
-              readRecord(
-                store,
-                key,
-                (previous) => {
-                  if (!previous || value.fetchedAt >= previous.fetchedAt)
-                    store.put({ version: 1, value }, key);
-                },
-                fail,
-              );
-            };
-            for (const { name, key, value } of entries) merge(name, key, value);
+          (transaction) => {
+            for (const { name, key, value } of entries) {
+              signal?.throwIfAborted();
+              transaction.objectStore(name).put({ version: 1, value }, key);
+            }
           },
           signal,
         );
@@ -1527,10 +1583,9 @@
           if (!snapshot) return;
           snapshots.push(snapshot);
         }
-        const userIds = new Set([home.id, ...initial.members]);
-        for (const snapshot of snapshots)
-          for (const id of snapshot.members ?? []) userIds.add(id);
-        const profiles = await database.read({ users: [...userIds] });
+        const profiles = await database.read({
+          users: [...new Set([home.id, ...initial.members])],
+        });
         const excludedIds = new Set([home.id, ...excluded.members]);
         const users = new Map();
         const user = (id) => {
@@ -1578,8 +1633,33 @@
             excludedIds,
           );
         }
+        const results = rankCandidates(candidates);
+        const loaded = new Set([home.id, ...initial.members]);
+        const hydrate = async (page) => {
+          const ids = [...new Set(page.map(({ id }) => id))].filter(
+            (id) => !loaded.has(id),
+          );
+          if (!ids.length) return;
+          const profiles = await database.read({ users: ids });
+          // Apply only after the entire read succeeds; a failed page is retryable.
+          for (const id of ids) {
+            const profile = profiles.users[id];
+            if (profile) Object.assign(user(id), profile);
+            loaded.add(id);
+          }
+          for (const candidate of page) {
+            const profile = users.get(candidate.id);
+            if (profile)
+              Object.assign(candidate, {
+                name: profile.name,
+                avatar: profile.avatar,
+              });
+          }
+        };
+        await hydrate(results.slice(0, 50));
         return {
-          results: rankCandidates(candidates),
+          results,
+          hydrate,
           complete: true,
           skipped,
           earliest: snapshots.reduce(
@@ -1603,6 +1683,61 @@
           { relationships, users: staged.users },
           { signal },
         );
+      },
+    };
+  }
+
+  // One queue belongs to one scan. Only successful commits advance deduplication;
+  // comparing at dequeue time also preserves changes such as A -> B -> A.
+  function observationSaver(cache, signal, report) {
+    const savedUsers = new Map();
+    const savedRelationships = new Map();
+    let pending = Promise.resolve();
+    let warning;
+    let committed = 0;
+    const content = ({ fetchedAt, ...value }) => JSON.stringify(value);
+    return {
+      enqueue(batch) {
+        if (warning || signal.aborted) return;
+        pending = pending.then(async () => {
+          if (warning || signal.aborted) return;
+          const users = Object.create(null);
+          const relationships = Object.create(null);
+          const userChanges = [];
+          const relationshipChanges = [];
+          for (const [id, value] of Object.entries(batch.users)) {
+            const signature = content(value);
+            if (savedUsers.get(id) === signature) continue;
+            users[id] = value;
+            userChanges.push([id, signature]);
+          }
+          for (const [id, directions] of Object.entries(batch.relationships)) {
+            for (const [direction, value] of Object.entries(directions)) {
+              const key = JSON.stringify([id, direction]);
+              const signature = content(value);
+              if (savedRelationships.get(key) === signature) continue;
+              relationships[id] ??= Object.create(null);
+              relationships[id][direction] = value;
+              relationshipChanges.push([key, signature]);
+            }
+          }
+          if (!userChanges.length && !relationshipChanges.length) return;
+          try {
+            await cache.commit({ relationships, users }, signal);
+            for (const [key, value] of userChanges) savedUsers.set(key, value);
+            for (const [key, value] of relationshipChanges)
+              savedRelationships.set(key, value);
+            committed++;
+          } catch (error) {
+            if (signal.aborted) return;
+            warning = `缓存保存失败：${cacheFailure(error)}；${committed ? "部分观察已保存" : "尚无观察保存成功"}，已停止后续保存`;
+            report(warning);
+          }
+        });
+      },
+      async finish() {
+        await pending;
+        return warning;
       },
     };
   }
@@ -1637,16 +1772,22 @@
         window,
         item.querySelector("a"),
         async (mode, options) => {
-          const outcome = await scanRelationships(window, home, mode, options);
-          if (outcome.complete) {
-            try {
-              await cache.commit(outcome.staged, options.signal);
-            } catch (error) {
-              options.signal.throwIfAborted();
-              outcome.saveWarning = `缓存保存失败：${cacheFailure(error)}；旧缓存保留`;
-            }
+          const saver = observationSaver(
+            cache,
+            options.signal,
+            options.saveFailed,
+          );
+          try {
+            const outcome = await scanRelationships(window, home, mode, {
+              ...options,
+              observe: (batch) => saver.enqueue(batch),
+            });
+            outcome.saveWarning = await saver.finish();
+            options.signal.throwIfAborted();
+            return outcome;
+          } finally {
+            await saver.finish();
           }
-          return outcome;
         },
         (mode) =>
           cache.lookup(mode).catch((error) => {

@@ -212,6 +212,7 @@ test("deleted names do not bypass network retries, timeouts or rate limiting", a
     open(app, "friends/friends");
     button(app.document, "开始寻找").click();
     await time.tick(100000);
+    await waitFor(() => button(app.document, "开始寻找"));
     assert.match(
       status(app.document),
       failure === "rate-limit" ? /未完成/ : /^读取失败，未完成.*失败 1/,

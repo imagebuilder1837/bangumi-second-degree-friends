@@ -93,10 +93,9 @@ export function relationshipCache(window, home) {
         if (!snapshot) return;
         snapshots.push(snapshot);
       }
-      const userIds = new Set([home.id, ...initial.members]);
-      for (const snapshot of snapshots)
-        for (const id of snapshot.members ?? []) userIds.add(id);
-      const profiles = await database.read({ users: [...userIds] });
+      const profiles = await database.read({
+        users: [...new Set([home.id, ...initial.members])],
+      });
       const excludedIds = new Set([home.id, ...excluded.members]);
       const users = new Map();
       const user = (id) => {
@@ -140,8 +139,33 @@ export function relationshipCache(window, home) {
           excludedIds,
         );
       }
+      const results = rankCandidates(candidates);
+      const loaded = new Set([home.id, ...initial.members]);
+      const hydrate = async (page) => {
+        const ids = [...new Set(page.map(({ id }) => id))].filter(
+          (id) => !loaded.has(id),
+        );
+        if (!ids.length) return;
+        const profiles = await database.read({ users: ids });
+        // Apply only after the entire read succeeds; a failed page is retryable.
+        for (const id of ids) {
+          const profile = profiles.users[id];
+          if (profile) Object.assign(user(id), profile);
+          loaded.add(id);
+        }
+        for (const candidate of page) {
+          const profile = users.get(candidate.id);
+          if (profile)
+            Object.assign(candidate, {
+              name: profile.name,
+              avatar: profile.avatar,
+            });
+        }
+      };
+      await hydrate(results.slice(0, 50));
       return {
-        results: rankCandidates(candidates),
+        results,
+        hydrate,
         complete: true,
         skipped,
         earliest: snapshots.reduce(

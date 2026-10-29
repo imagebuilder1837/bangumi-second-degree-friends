@@ -18,8 +18,11 @@ export function interceptWrites(indexedDB, write) {
   return interceptTransactions(indexedDB, (transaction, mode) => {
     if (mode !== "readwrite") return;
     const objectStore = transaction.objectStore.bind(transaction);
+    const wrapped = new WeakSet();
     transaction.objectStore = (...args) => {
       const store = objectStore(...args);
+      if (wrapped.has(store)) return store;
+      wrapped.add(store);
       const put = store.put.bind(store);
       store.put = (...args) => write(put, ...args);
       return store;

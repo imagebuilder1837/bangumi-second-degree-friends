@@ -135,6 +135,9 @@ test("a relationship snapshot larger than localStorage survives a fresh cache in
     "friends/friends",
   );
   assert.equal(cached.results.length, 66534);
+  await cached.hydrate(
+    cached.results.filter((user) => user.id === "user66533"),
+  );
   assert.equal(
     cached.results.find((user) => user.id === "user66533").name,
     "Name user66533 用户展示名称测试",
@@ -168,7 +171,7 @@ test("a write error after requests were queued rolls back all snapshots and disp
   assert.equal(cached.latest, 1);
 });
 
-test("concurrent cache instances merge the latest committed snapshots and preserve unrelated directions", async () => {
+test("concurrent cache instances replace by commit order and preserve unrelated directions", async () => {
   const window = environment();
   const first = relationshipCache(window, home);
   const second = relationshipCache(window, home);
@@ -186,7 +189,7 @@ test("concurrent cache instances merge the latest committed snapshots and preser
   const refreshed = relationshipCache(window, home);
   assert.deepEqual(
     (await refreshed.lookup("friends/friends")).results.map((user) => user.id),
-    ["fresh"],
+    ["old"],
   );
   assert.deepEqual(
     (await refreshed.lookup("rev_friends/rev_friends")).results,
@@ -345,9 +348,7 @@ test("skip observations persist independently by direction and replace rather th
   );
   assert.deepEqual(reverse.skipped, []);
   await fresh.commit(staged(["stale"], 1), signal());
-  assert.deepEqual((await fresh.lookup("friends/friends")).skipped, [
-    expectedSkip,
-  ]);
+  assert.deepEqual((await fresh.lookup("friends/friends")).skipped, []);
   await fresh.commit(staged(["restored"], 3), signal());
   const restored = await fresh.lookup("friends/friends");
   assert.deepEqual(
@@ -356,6 +357,13 @@ test("skip observations persist independently by direction and replace rather th
   );
   assert.deepEqual(restored.skipped, []);
   // A skipped observation is insufficient for the home or exclusion relationship.
+  await fresh.commit(
+    {
+      relationships: { bob: { friends: { skipped: true, fetchedAt: 4 } } },
+      users: {},
+    },
+    signal(),
+  );
   assert.equal(
     await relationshipCache(window, { id: "bob" }).lookup("friends/friends"),
     undefined,

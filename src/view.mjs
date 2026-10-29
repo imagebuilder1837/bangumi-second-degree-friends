@@ -272,6 +272,10 @@ export function mountView(
   };
   const expanded = new Set();
   let visibleRanks = 50;
+  let hydrate;
+  let presentation = 0;
+  let paginationStatus;
+  let latestPresentation;
   const visibleContributors = new Map();
   const moreRanks = document.createElement("button");
   moreRanks.type = "button";
@@ -386,14 +390,51 @@ export function mountView(
       list.after(moreRanks);
       moreRanks.onclick = () => {
         const from = visibleRanks;
-        visibleRanks += 50;
-        render(results, complete, {
-          from,
-          focusKey:
-            document.activeElement === moreRanks
-              ? `candidate:${results[from].id}`
-              : undefined,
-        });
+        const focused = document.activeElement === moreRanks;
+        const request = presentation;
+        const append = () => {
+          visibleRanks += 50;
+          if (dialog.hidden) {
+            pendingPresentation = latestPresentation;
+            return;
+          }
+          render(results, complete, {
+            from,
+            focusKey:
+              focused && document.activeElement === moreRanks
+                ? `candidate:${results[from].id}`
+                : undefined,
+          });
+        };
+        if (!hydrate) {
+          append();
+          return;
+        }
+        paginationStatus ??= [
+          status.textContent,
+          status.dataset.warning === "true",
+        ];
+        const [previousStatus, previousWarning] = paginationStatus;
+        moreRanks.disabled = true;
+        hydrate(results.slice(from, from + 50))
+          .then(
+            () => {
+              if (request !== presentation) return;
+              append();
+              setStatus(previousStatus, previousWarning);
+              paginationStatus = undefined;
+            },
+            (error) => {
+              if (request !== presentation) return;
+              setStatus(
+                `资料读取失败：${error.message}；点击显示更多重试`,
+                true,
+              );
+            },
+          )
+          .finally(() => {
+            if (request === presentation) moreRanks.disabled = false;
+          });
       };
     }
     if (!dialog.hidden && focusedKey) {
@@ -421,10 +462,15 @@ export function mountView(
     showDetails(skipped, failures);
   };
   const presentResults = (results, complete = false, skipped, failures) => {
-    pendingPresentation = { results, complete, skipped, failures };
+    latestPresentation = { results, complete, skipped, failures };
+    pendingPresentation = latestPresentation;
     paintResults();
   };
   const resetResults = () => {
+    presentation++;
+    hydrate = undefined;
+    paginationStatus = undefined;
+    moreRanks.disabled = false;
     details.open = false;
     expanded.clear();
     visibleContributors.clear();
@@ -454,6 +500,7 @@ export function mountView(
       return;
     }
     if (request !== cacheRequest) return;
+    hydrate = outcome?.hydrate;
     presentResults(outcome?.results ?? [], Boolean(outcome), outcome?.skipped);
     if (window.Date.now() < cooldownUntil) return;
     setStatus(
@@ -492,6 +539,14 @@ export function mountView(
     try {
       const outcome = await scan(current.mode, {
         signal: current.controller.signal,
+        saveFailed: (warning) => {
+          current.saveWarning = warning;
+          if (task === current && !current.controller.signal.aborted)
+            setStatus(
+              `${current.progress ? `扫描进度：${current.progress}；` : ""}${warning}`,
+              true,
+            );
+        },
         rateLimited: (until) => {
           cooldownUntil = until;
           current.rateLimited = true;
@@ -516,7 +571,11 @@ export function mountView(
           current.progress = progress;
           presentResults(results, false, skipped, failures);
           setProgress(counts);
-          if (counts) setStatus(`扫描进度：${progress}`, counts.failed > 0);
+          if (counts)
+            setStatus(
+              `扫描进度：${progress}${current.saveWarning ? `；${current.saveWarning}` : ""}`,
+              counts.failed > 0 || Boolean(current.saveWarning),
+            );
         },
       });
       presentResults(
@@ -537,6 +596,7 @@ export function mountView(
           ? "已停止，结果未完成"
           : `读取失败，未完成：${error.message}`;
       if (current.progress) message += `；${current.progress}`;
+      if (current.saveWarning) message += `；${current.saveWarning}`;
       // Unknown totals must not keep looking like an active scan after stopping.
       if (!progressBar.hasAttribute("value")) progressBar.hidden = true;
       setStatus(message, true);

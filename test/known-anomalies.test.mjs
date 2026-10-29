@@ -34,7 +34,9 @@ test("known missing identifiers in home and intermediate relationships retain us
           ),
         );
       };
+      const observations = [];
       const outcome = await scanRelationships(window, home, mode, {
+        observe: (batch) => observations.push(batch),
         signal: new window.AbortController().signal,
         update() {},
         rateLimited() {},
@@ -57,7 +59,8 @@ test("known missing identifiers in home and intermediate relationships retain us
         mode.split("/")[0] === mode.split("/")[1] ? 1 : 2,
       );
       const cache = relationshipCache(window, home);
-      await cache.commit(outcome.staged, new window.AbortController().signal);
+      for (const observation of observations)
+        await cache.commit(observation, new window.AbortController().signal);
       const cached = await cache.lookup(mode);
       assert.deepEqual(
         cached.results.map((u) => [

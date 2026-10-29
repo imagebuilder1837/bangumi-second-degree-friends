@@ -7,17 +7,13 @@ export async function scanRelationships(
   window,
   home,
   mode,
-  { update, signal, rateLimited },
+  { update, signal, rateLimited, observe = () => {} },
 ) {
   const [first, second] = mode.split("/");
   const homeUrl = (direction) => {
     const url = direction === "friends" ? home.friendsUrl : home.reverseUrl;
     if (!url) throw new Error("缺少主页关系列表链接");
     return url;
-  };
-  const staged = {
-    relationships: Object.create(null),
-    users: Object.create(null),
   };
   const skipped = [];
   const failures = [];
@@ -32,30 +28,37 @@ export async function scanRelationships(
       url,
     );
     const direction = new URL(url).pathname.split("/").at(-1);
-    staged.relationships[id] ??= Object.create(null);
-    staged.relationships[id][direction] = {
+    const snapshot = {
       members: [...members.keys()],
       fetchedAt: window.Date.now(),
       ...(missingIdentifiers ? { missingIdentifiers } : {}),
     };
     if (missingIdentifiers)
       skipped.push(skippedRelationship(user, direction, missingIdentifiers));
-    staged.users[id] = {
+    const users = Object.create(null);
+    users[id] = {
       name: user.name,
       avatar: user.avatar,
       fetchedAt: window.Date.now(),
     };
-    for (const user of members.values())
-      staged.users[user.id] = {
+    for (const user of members.values()) {
+      users[user.id] = {
         name: user.name,
         avatar: user.avatar,
         fetchedAt: window.Date.now(),
       };
-    return members;
+    }
+    observe({
+      relationships: {
+        [id]: { [direction]: snapshot },
+      },
+      users,
+    });
+    return { members, missingIdentifiers };
   };
   const readHome = async (direction) => {
     try {
-      const members = await read(home, homeUrl(direction));
+      const { members } = await read(home, homeUrl(direction));
       update([], "", undefined, skipped, failures);
       return members;
     } catch (error) {
@@ -105,15 +108,14 @@ export async function scanRelationships(
         home.friendsUrl,
       ).href;
       try {
-        const members = await read(intermediary, url);
+        const { members, missingIdentifiers } = await read(intermediary, url);
         candidates = addContributions(
           candidates,
           members.values(),
           intermediary,
           excludedIds,
         );
-        if (staged.relationships[intermediary.id][second].missingIdentifiers)
-          skippedIntermediates++;
+        if (missingIdentifiers) skippedIntermediates++;
         else succeeded++;
       } catch (error) {
         signal.throwIfAborted();
@@ -123,11 +125,14 @@ export async function scanRelationships(
         ) {
           skipped.push(skippedRelationship(intermediary, second));
           skippedIntermediates++;
-          staged.relationships[intermediary.id] ??= Object.create(null);
-          staged.relationships[intermediary.id][second] = {
-            skipped: true,
-            fetchedAt: window.Date.now(),
-          };
+          observe({
+            relationships: {
+              [intermediary.id]: {
+                [second]: { skipped: true, fetchedAt: window.Date.now() },
+              },
+            },
+            users: {},
+          });
         } else {
           failed++;
           failures.push({
@@ -143,5 +148,5 @@ export async function scanRelationships(
   await Promise.all(
     Array.from({ length: Math.min(4, intermediates.length) }, worker),
   );
-  return { ...publish(), staged };
+  return publish();
 }

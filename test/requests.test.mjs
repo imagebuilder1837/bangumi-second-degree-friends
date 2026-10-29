@@ -229,6 +229,7 @@ test("an intermediate retry contributes only once and advances processed progres
   assert.match(status(document), /1\/2.*成功 0.*失败 1/);
   assert.equal(document.querySelectorAll("ol > li").length, 0);
   await time.tick(125);
+  await waitFor(() => button(document, "开始寻找"));
   assert.match(status(document), /^读取失败，未完成.*2\/2.*成功 1.*失败 1/);
   assert.equal(document.querySelector("ol .count").textContent, "1");
   assert.equal(bobAttempts, 2);

@@ -2,6 +2,7 @@ import { readHome } from "./site.mjs";
 import { scanRelationships } from "./scan.mjs";
 import { mountView } from "./view.mjs";
 import { relationshipCache, cacheFailure } from "./cache.mjs";
+import { observationSaver } from "./saving.mjs";
 
 export function initialize(window) {
   const { document, location } = window;
@@ -33,16 +34,22 @@ export function initialize(window) {
       window,
       item.querySelector("a"),
       async (mode, options) => {
-        const outcome = await scanRelationships(window, home, mode, options);
-        if (outcome.complete) {
-          try {
-            await cache.commit(outcome.staged, options.signal);
-          } catch (error) {
-            options.signal.throwIfAborted();
-            outcome.saveWarning = `缓存保存失败：${cacheFailure(error)}；旧缓存保留`;
-          }
+        const saver = observationSaver(
+          cache,
+          options.signal,
+          options.saveFailed,
+        );
+        try {
+          const outcome = await scanRelationships(window, home, mode, {
+            ...options,
+            observe: (batch) => saver.enqueue(batch),
+          });
+          outcome.saveWarning = await saver.finish();
+          options.signal.throwIfAborted();
+          return outcome;
+        } finally {
+          await saver.finish();
         }
-        return outcome;
       },
       (mode) =>
         cache.lookup(mode).catch((error) => {

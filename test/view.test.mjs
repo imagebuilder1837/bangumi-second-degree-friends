@@ -588,6 +588,7 @@ test("cached rankings disclose exact contributors and mode changes reset both ca
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 40);
   button(row(), "显示更多头像").click();
   button(document, "显示更多候选用户").click();
+  await waitFor(() => document.querySelectorAll("ol > li").length === 100);
   assert.equal(row().querySelectorAll(".sdf-contributors a").length, 42);
   assert.deepEqual(
     [...row().querySelectorAll(".sdf-contributors a")]
