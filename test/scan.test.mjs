@@ -65,9 +65,9 @@ test("later relationship reads never change previously published candidate resul
   );
 });
 
-test("start reads the provided current username relationship link, not visitor or numeric UID", async (t) => {
+test("start reads the final homepage user's relationship link, not the visitor's", async (t) => {
   const { document, requests } = component(t, {
-    url: "https://bgm.tv/user/1",
+    url: "https://bgm.tv/user/alice",
     respond: () => response(relationship("alice")),
   });
   link(document, "二度好友发现").click();

@@ -1,4 +1,10 @@
-export function mountView(window, entry, scan, cached = async () => undefined) {
+export function mountView(
+  window,
+  entry,
+  scan,
+  cached = async () => undefined,
+  homeName = "主页用户",
+) {
   const { document } = window;
   const dialog = document.createElement("section");
   dialog.id = "second-degree-friends-dialog";
@@ -246,10 +252,6 @@ export function mountView(window, entry, scan, cached = async () => undefined) {
     }
   };
   const resultsRegion = dialog.querySelector(".sdf-results");
-  const homeName =
-    document
-      .querySelector("#headerProfile h1.nameSingle .inner > .name > a[href]")
-      ?.textContent.trim() || "主页用户";
   const setStatus = (text, warning = false) => {
     status.textContent = text;
     status.dataset.warning = String(warning);

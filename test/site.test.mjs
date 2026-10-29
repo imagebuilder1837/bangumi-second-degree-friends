@@ -10,6 +10,20 @@ const friends = await readFile(
 );
 const base = "https://bgm.tv/user/alice/friends";
 
+test("relationship response bodies must identify the requested owner independently of their URL", (t) => {
+  const { window } = new JSDOM("");
+  t.after(() => window.close());
+  for (const html of [
+    friends.replaceAll("alice", "other"),
+    friends.replace(/<a href="\/user\/alice">[^<]*<\/a>/, "主页名称"),
+  ]) {
+    assert.throws(
+      () => readRelationships(window, html, "alice", base),
+      /身份|识别/,
+    );
+  }
+});
+
 test("relationship entries retain the first structurally valid user link", async (t) => {
   const cases = [
     ["ordinary entry", friends],

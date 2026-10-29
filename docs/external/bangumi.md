@@ -113,9 +113,10 @@
 
 - **实测**：同一列表混有 `/user/2`、`/user/237` 和 `/user/e6nian`、`/user/asher`。显示名与路径不同，例如 `/user/asher` 的显示名为“白菜”。
 - **官方 schema**：[Bangumi API `v0.yaml`](https://github.com/bangumi/api/blob/master/open-api/v0.yaml) 的 User 区分 integer `id`、string `username`、string `nickname`；`username` 注释为“唯一用户名，初始与 UID 相同，可修改一次”。API 的 `path_username` 明写“设置了用户名之后无法使用 UID”。这条限制是 **API 文档**，不是所有网页路由的保证。数字与非数字路径混用本身也不能证明列表未规范化，因为未改名用户的 username 本就可以是数字。
-- **主页身份实测**：[`/user/1`](https://bgm.tv/user/1) 与 [`/user/sai`](https://bgm.tv/user/sai) 的标题均含 `<div class="name"><a href="/user/sai">Sai🖖</a><small class="grey">@sai</small>`。主页身份链接可定位为 `#headerProfile h1.nameSingle .inner > .name > a[href]`；明示用户名为同级 `small.grey` 文本。两份响应未找到 canonical；`CHOBITS_UID`、`CHOBITS_USERNAME` 表示当前访问者，不能作为主页用户身份。
+- **主页身份实测**：Edge 中同源 Fetch 请求 [`/user/1`](https://bgm.tv/user/1) 的 `response.redirected` 为 `true`，最终 URL 为 [`/user/sai`](https://bgm.tv/user/sai)；直接请求后者不跳转。两者正文标题均含 `<div class="name"><a href="/user/sai">Sai🖖</a><small class="grey">@sai</small>`。此样本支持从重定向后的主页路径读取用户标识，不证明所有域名和用户的重定向行为。`CHOBITS_UID`、`CHOBITS_USERNAME` 表示当前访问者，不能作为主页用户身份。
 - **主页关系链接实测**：两份主页均明确提供 `/user/sai/friends` 与 `/user/sai/rev_friends`，分别可定位为 `#headerProfile .navTabs a[href$="/friends"]` 和 `#friend a[href$="/rev_friends"]`。**推断**：消费主页已给出的路径可避免猜测数字子路由；这不解释数字子路由的服务器机制，也不保证所有列表条目始终使用当前路径身份。
-- **实测反例／待解释**：[`/user/1`](https://bgm.tv/user/1)返回含 `@sai` 的主页，但 [`/user/1/rev_friends`](https://bgm.tv/user/1/rev_friends)本次返回 133877 字符，已查看的开头条目与 Sai 的 friends 一致；`/user/sai/rev_friends` 则为 869210 字符，早期条目也有差别。**不能推定数字 ID 与自定义用户名的子路由等价。** 工具不提供重定向链，未能确认是重定向、路由行为还是抓取链路差异；不据此断言服务器重定向目标。
+- **关系子路由边界**：不能由主页重定向推定数值 UID 与自定义用户标识的关系子路由等价；主页重定向也不构成放宽关系响应跳转校验的依据。
+- **组件兼容实证**：[标题去超链接组件 1.3](https://bgm.tv/dev/app/5543/gadget/3051) 源码将 `div.name` 内匹配用户主页路径的链接替换为同内容文本节点，保留同级 `small.grey`；在 DOM 就绪时及后续 MutationObserver 回调中执行。它不修改 Fetch 返回的 HTML，不能据此取消远程关系正文的身份校验。
 - **推断**：跨响应合并身份时，原始 href 字符串、显示名、头像文件名均不足以证明是永久稳定 ID。头像样本有默认 `icon.jpg`、数字文件名和带随机后缀／查询参数的文件名，不是可靠的身份映射契约。数字 ID 的长期不可变性未找到明确官方网页契约。
 
 ## 5. 匿名、空列表与错误响应

@@ -21,6 +21,54 @@ function selectMode(app, value) {
   select.dispatchEvent(new app.window.Event("change"));
 }
 
+test("homepage display names survive title link removal before or after initialization", async (t) => {
+  for (const timing of ["before", "after", "empty"]) {
+    const storage = sharedStorage();
+    const configure = (window) => {
+      storage.install(window);
+      const name = window.document.querySelector("#headerProfile .name");
+      name.querySelector("a").textContent =
+        timing === "empty" ? " " : "主页 🖖";
+      name.insertAdjacentHTML(
+        "beforeend",
+        '<span id="friend_flag">好友状态</span><button>操作</button><a href="/settings">编辑</a><a href="/user/alice/edit">修改资料</a>',
+      );
+      if (timing !== "after") {
+        const anchor = name.querySelector("a");
+        anchor.replaceWith(window.document.createTextNode(anchor.textContent));
+      }
+    };
+    const live = component(t, {
+      configure,
+      respond(url) {
+        const owner = new URL(url).pathname.split("/")[2];
+        return response(
+          relationship(owner, owner === "alice" ? ["bob"] : ["zed"]),
+        );
+      },
+    });
+    if (timing === "after") {
+      const anchor = live.document.querySelector("#headerProfile .name > a");
+      anchor.replaceWith(live.document.createTextNode(anchor.textContent));
+    }
+    assert.ok(link(live.document, "二度好友发现"));
+    open(live.document);
+    button(live.document, "开始寻找").click();
+    await finished(live.document);
+    const cached = component(t, { configure });
+    open(cached.document);
+    await waitFor(() =>
+      status(cached.document).textContent.startsWith("已载入缓存"),
+    );
+    for (const app of [live, cached]) {
+      assert.equal(
+        app.document.querySelector(".sdf-score").textContent,
+        `${timing === "empty" ? "alice" : "主页 🖖"} 的 1 位好友加了 TA`,
+      );
+    }
+  }
+});
+
 test("dialog presents start, mode and accessible close in sketch order without a redundant title", (t) => {
   const { document } = component(t);
   open(document);

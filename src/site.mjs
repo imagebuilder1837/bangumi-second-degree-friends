@@ -16,7 +16,9 @@ function identity(document, base) {
 }
 
 export function readHome(document, base) {
-  const id = identity(document, base);
+  const match = /^\/user\/([^/]+)\/?$/.exec(new URL(base).pathname);
+  if (!match) throw new Error("无法识别主页用户");
+  const id = decodeURIComponent(match[1]);
   const anchor = document.querySelector(
     '#headerProfile .navTabs a[href$="/friends"]',
   );
@@ -37,9 +39,23 @@ export function readHome(document, base) {
     )
       throw new Error("反向好友链接身份不匹配");
   }
+  const title = document.querySelector(
+    "#headerProfile h1.nameSingle .inner > .name",
+  );
   const name =
-    document.querySelector("#headerProfile .name > a")?.textContent.trim() ??
-    id;
+    [...(title?.childNodes ?? [])]
+      .filter(
+        (node) =>
+          node.nodeType === 3 ||
+          (node.nodeName === "A" &&
+            node.hasAttribute("href") &&
+            /^\/user\/[^/]+\/?$/.test(
+              new URL(node.getAttribute("href"), base).pathname,
+            )),
+      )
+      .map((node) => node.textContent)
+      .join("")
+      .trim() || id;
   const background = document.querySelector("#headerProfile .avatarNeue")?.style
     .backgroundImage;
   const image = background && /^url\(["']?(.*?)["']?\)$/.exec(background)?.[1];

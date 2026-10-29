@@ -36,7 +36,9 @@
   }
 
   function readHome(document, base) {
-    const id = identity(document, base);
+    const match = /^\/user\/([^/]+)\/?$/.exec(new URL(base).pathname);
+    if (!match) throw new Error("无法识别主页用户");
+    const id = decodeURIComponent(match[1]);
     const anchor = document.querySelector(
       '#headerProfile .navTabs a[href$="/friends"]',
     );
@@ -57,9 +59,23 @@
       )
         throw new Error("反向好友链接身份不匹配");
     }
+    const title = document.querySelector(
+      "#headerProfile h1.nameSingle .inner > .name",
+    );
     const name =
-      document.querySelector("#headerProfile .name > a")?.textContent.trim() ??
-      id;
+      [...(title?.childNodes ?? [])]
+        .filter(
+          (node) =>
+            node.nodeType === 3 ||
+            (node.nodeName === "A" &&
+              node.hasAttribute("href") &&
+              /^\/user\/[^/]+\/?$/.test(
+                new URL(node.getAttribute("href"), base).pathname,
+              )),
+        )
+        .map((node) => node.textContent)
+        .join("")
+        .trim() || id;
     const background = document.querySelector("#headerProfile .avatarNeue")
       ?.style.backgroundImage;
     const image =
@@ -454,7 +470,13 @@
     return { ...publish(), staged };
   }
 
-  function mountView(window, entry, scan, cached = async () => undefined) {
+  function mountView(
+    window,
+    entry,
+    scan,
+    cached = async () => undefined,
+    homeName = "主页用户",
+  ) {
     const { document } = window;
     const dialog = document.createElement("section");
     dialog.id = "second-degree-friends-dialog";
@@ -702,10 +724,6 @@
       }
     };
     const resultsRegion = dialog.querySelector(".sdf-results");
-    const homeName =
-      document
-        .querySelector("#headerProfile h1.nameSingle .inner > .name > a[href]")
-        ?.textContent.trim() || "主页用户";
     const setStatus = (text, warning = false) => {
       status.textContent = text;
       status.dataset.warning = String(warning);
@@ -1634,6 +1652,7 @@
           cache.lookup(mode).catch((error) => {
             throw new Error(cacheFailure(error));
           }),
+        home.name,
       );
     };
     if (document.readyState === "loading")

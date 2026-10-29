@@ -48,6 +48,7 @@ export function initialize(window) {
         cache.lookup(mode).catch((error) => {
           throw new Error(cacheFailure(error));
         }),
+      home.name,
     );
   };
   if (document.readyState === "loading")
