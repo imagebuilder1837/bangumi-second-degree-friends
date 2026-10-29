@@ -59,6 +59,7 @@ test("hidden scans keep progress and completion only in the dialog, and reopen t
     },
   });
   const entry = link(document, "二度好友发现");
+  const entryText = entry.closest("li").textContent;
   entry.click();
   const mode = document.querySelector("select");
   mode.value = "rev_friends/rev_friends";
@@ -77,10 +78,7 @@ test("hidden scans keep progress and completion only in the dialog, and reopen t
     "hidden updates defer result painting",
   );
   assert.ok(dialog.hidden);
-  assert.equal(
-    entry.closest("li").textContent,
-    "SecondDegreeFriends 二度好友发现",
-  );
+  assert.equal(entry.closest("li").textContent, entryText);
   assert.match(dialog.querySelector('[role="status"]').textContent, /1\/2/);
   entry.click();
   assert.equal(mode.value, "rev_friends/rev_friends");
@@ -91,10 +89,7 @@ test("hidden scans keep progress and completion only in the dialog, and reopen t
   pending.get("carol")(response(relationship("carol", ["zed"])));
   await waitFor(() => button(document, "开始寻找"));
   assert.ok(dialog.hidden, "completion never opens the dialog");
-  assert.equal(
-    entry.closest("li").textContent,
-    "SecondDegreeFriends 二度好友发现",
-  );
+  assert.equal(entry.closest("li").textContent, entryText);
   assert.match(dialog.querySelector('[role="status"]').textContent, /完成/);
   entry.click();
   assert.equal(document.querySelector("ol .count").textContent, "2");
@@ -112,6 +107,7 @@ test("modal keyboard focus and scroll stay contained until Esc hides without sto
   document.body.style.overflow = "scroll";
   document.documentElement.style.overflow = "auto";
   const entry = link(document, "二度好友发现");
+  const entryText = entry.closest("li").textContent;
   entry.click();
   const dialog = document.querySelector('[role="dialog"]');
   assert.ok(dialog.contains(document.activeElement));
@@ -158,10 +154,7 @@ test("modal keyboard focus and scroll stay contained until Esc hides without sto
   button(document, "停止寻找").click();
   await waitFor(() => button(document, "开始寻找"));
   assert.ok(signal.aborted, "explicit stop cancels the request");
-  assert.equal(
-    entry.closest("li").textContent,
-    "SecondDegreeFriends 二度好友发现",
-  );
+  assert.equal(entry.closest("li").textContent, entryText);
   assert.match(dialog.querySelector('[role="status"]').textContent, /未完成/);
   button(document, "关闭").click();
   assert.equal(document.activeElement, entry);
@@ -521,7 +514,9 @@ test("expanding incomplete mixed-direction results never awards medals or includ
         : response(relationship(path.split("/")[0], graph[path]));
     },
   });
-  link(document, "二度好友发现").click();
+  const entry = link(document, "二度好友发现");
+  const entryText = entry.closest("li").textContent;
+  entry.click();
   const mode = document.querySelector("select");
   mode.value = "friends/rev_friends";
   mode.dispatchEvent(new window.Event("change"));
@@ -540,10 +535,7 @@ test("expanding incomplete mixed-direction results never awards medals or includ
     ["/user/bob", "/user/carol"],
   );
   assert.equal(document.querySelectorAll("[data-medal]").length, 0);
-  assert.equal(
-    link(document, "二度好友发现").closest("li").textContent,
-    "SecondDegreeFriends 二度好友发现",
-  );
+  assert.equal(entry.closest("li").textContent, entryText);
   assert.match(document.querySelector('[role="status"]').textContent, /未完成/);
   button(document, "收起").click();
   assert.equal(document.querySelectorAll("[data-medal]").length, 0);

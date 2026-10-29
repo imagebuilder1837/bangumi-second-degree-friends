@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bangumi 二度好友发现
 // @namespace    https://github.com/imagebuilder1837/bangumi-second-degree-friends
-// @version      0.1.0
+// @version      0.1.1
 // @description  发现那些 TA 的好友加了但 TA 没加的用户。
 // @author       imagebuilder1837
 // @match        https://bgm.tv/user/*

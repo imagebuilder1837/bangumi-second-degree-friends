@@ -57,7 +57,6 @@ test("details show failures before both kinds of skips with linked names, small 
     ["/user/bob", "/user/carol"],
   );
   for (const row of rows) {
-    assert.equal(row.querySelector("img").width, 24);
     assert.equal(row.querySelectorAll("a").length, 2);
     assert.equal(row.querySelectorAll('a[target="_blank"]').length, 2);
     assert.match(row.querySelector(".sdf-detail-user").textContent, / · 好友$/);

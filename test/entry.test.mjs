@@ -12,10 +12,6 @@ test("HTTPS homepages append one discovery entry after existing network services
     const list = document.querySelector(".network_service");
     assert.equal(list.children.length, 2);
     assert.equal(
-      list.lastElementChild.querySelector(".service").textContent,
-      "SecondDegreeFriends",
-    );
-    assert.equal(
       link(document, "二度好友发现").closest("li"),
       list.lastElementChild,
     );

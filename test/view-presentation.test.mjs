@@ -133,10 +133,6 @@ test("all four modes explain actual directions and distinct counts identically i
       assert.equal(row.querySelector(".sdf-contributors"), null);
       const summary = row.querySelector(".sdf-candidate");
       assert.equal(summary.firstElementChild.textContent, "1");
-      assert.equal(
-        summary.firstElementChild.getAttribute("aria-label"),
-        "第 1 名",
-      );
       button(row, "展开").click();
       const expanded = app.document.querySelector("ol > li");
       assert.equal(

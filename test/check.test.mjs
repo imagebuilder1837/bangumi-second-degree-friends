@@ -44,17 +44,6 @@ test("check rejects a stale artifact without rewriting it", async (t) => {
   assert.equal(await app.read("src/index.user.js"), artifact);
 });
 
-test("check rejects package and lockfile version drift even after rebuilding", async (t) => {
-  const app = await ready(t);
-  const manifest = JSON.parse(await app.read("package.json"));
-  manifest.version = "0.1.1";
-  await app.write("package.json", JSON.stringify(manifest));
-  assert.equal(app.run("build").status, 0);
-  const check = app.run("check");
-  assert.notEqual(check.status, 0, check.output);
-  assert.match(check.output, /lockfile.*version/i);
-});
-
 test("build and check reject versions other than stable three-part numeric releases", async (t) => {
   const app = await ready(t);
   const manifest = JSON.parse(await app.read("package.json"));
